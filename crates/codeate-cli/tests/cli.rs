@@ -118,7 +118,11 @@ fn analyze_persists_a_graph_and_prints_a_summary() {
     assert!(stdout.contains("edges"));
 
     let store_path = repo.root.join(".codeate").join("graph.json");
-    assert!(store_path.exists(), "expected {} to exist", store_path.display());
+    assert!(
+        store_path.exists(),
+        "expected {} to exist",
+        store_path.display()
+    );
 
     let stored: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&store_path).expect("read store"))
@@ -194,8 +198,7 @@ fn query_symbol_finds_a_known_symbol_by_name_in_both_output_modes() {
         .output()
         .expect("run codeate query symbol --json");
     assert!(json_output.status.success());
-    let value: serde_json::Value =
-        serde_json::from_slice(&json_output.stdout).expect("valid json");
+    let value: serde_json::Value = serde_json::from_slice(&json_output.stdout).expect("valid json");
     let matches = value.as_array().expect("json array");
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0]["name"], "Point");
@@ -311,7 +314,13 @@ fn query_dependencies_and_dependents_follow_a_cross_file_import() {
     let shape_id = symbol_id(&store, "Shape");
 
     let deps = codeate()
-        .args(["query", "dependencies", "--id", &circle_module_id, "--store"])
+        .args([
+            "query",
+            "dependencies",
+            "--id",
+            &circle_module_id,
+            "--store",
+        ])
         .arg(&store)
         .arg("--json")
         .output()

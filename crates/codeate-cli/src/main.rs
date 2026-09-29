@@ -44,21 +44,45 @@ enum QueryKind {
     /// Every symbol with this exact name, and the id to target it with.
     Symbol { name: String },
     /// The syntax entity that declares a symbol.
-    Definition { #[arg(long)] id: String },
+    Definition {
+        #[arg(long)]
+        id: String,
+    },
     /// Symbols that call this symbol.
-    Callers { #[arg(long)] id: String },
+    Callers {
+        #[arg(long)]
+        id: String,
+    },
     /// Symbols this symbol calls.
-    Callees { #[arg(long)] id: String },
+    Callees {
+        #[arg(long)]
+        id: String,
+    },
     /// Everything this symbol/module transitively depends on.
-    Dependencies { #[arg(long)] id: String },
+    Dependencies {
+        #[arg(long)]
+        id: String,
+    },
     /// Everything that transitively depends on this symbol/module.
-    Dependents { #[arg(long)] id: String },
+    Dependents {
+        #[arg(long)]
+        id: String,
+    },
     /// Symbols that implement this interface/trait.
-    Implementers { #[arg(long)] id: String },
+    Implementers {
+        #[arg(long)]
+        id: String,
+    },
     /// Symbols that reference this symbol.
-    References { #[arg(long)] id: String },
+    References {
+        #[arg(long)]
+        id: String,
+    },
     /// Everything transitively affected by a change to this symbol.
-    Impact { #[arg(long)] id: String },
+    Impact {
+        #[arg(long)]
+        id: String,
+    },
     /// Functions/methods named `main`.
     EntryPoints,
     /// The nested module hierarchy.
@@ -140,7 +164,10 @@ fn syntax_json(entity: &codeate_core::SyntaxEntity) -> serde_json::Value {
 }
 
 fn print_json(value: &serde_json::Value) {
-    println!("{}", serde_json::to_string_pretty(value).expect("value is serializable"));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).expect("value is serializable")
+    );
 }
 
 fn node_json(node: &codeate_core::Node) -> serde_json::Value {
@@ -188,12 +215,20 @@ fn print_symbol_list(matches: &[&codeate_core::SymbolEntity], empty_message: &st
         println!("{empty_message}");
     } else {
         for symbol in matches {
-            println!("{}  {}  {}", symbol.id.as_str(), symbol.kind.as_str(), symbol.name);
+            println!(
+                "{}  {}  {}",
+                symbol.id.as_str(),
+                symbol.kind.as_str(),
+                symbol.name
+            );
         }
     }
 }
 
-fn require_symbol(engine: &codeate_core::QueryEngine, id: &codeate_core::EntityId) -> Result<(), String> {
+fn require_symbol(
+    engine: &codeate_core::QueryEngine,
+    id: &codeate_core::EntityId,
+) -> Result<(), String> {
     if engine.symbol_by_id(id).is_none() {
         Err(format!("no symbol with id {}", id.as_str()))
     } else {
@@ -214,7 +249,12 @@ fn print_syntax_list(matches: &[&codeate_core::SyntaxEntity], empty_message: &st
         println!("{empty_message}");
     } else {
         for entity in matches {
-            println!("{}  {}  {}", entity.id.as_str(), entity.kind.as_str(), entity.name);
+            println!(
+                "{}  {}  {}",
+                entity.id.as_str(),
+                entity.kind.as_str(),
+                entity.name
+            );
         }
     }
 }
@@ -227,7 +267,12 @@ fn module_tree_json(tree: &codeate_core::ModuleTree) -> serde_json::Value {
 }
 
 fn print_module_tree(tree: &codeate_core::ModuleTree, depth: usize) {
-    println!("{}{}  {}", "  ".repeat(depth), tree.module.id.as_str(), tree.module.name);
+    println!(
+        "{}{}  {}",
+        "  ".repeat(depth),
+        tree.module.id.as_str(),
+        tree.module.name
+    );
     for child in &tree.children {
         print_module_tree(child, depth + 1);
     }
@@ -241,7 +286,9 @@ fn cmd_definition(
     require_symbol(engine, id)?;
     let definition = engine.definition_of(id);
     if json {
-        let value = definition.map(syntax_json).unwrap_or(serde_json::Value::Null);
+        let value = definition
+            .map(syntax_json)
+            .unwrap_or(serde_json::Value::Null);
         print_json(&value);
     } else {
         match definition {
@@ -284,7 +331,12 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
         QueryKind::Dependencies { id } => {
             let id = parse_id(&id)?;
             require_symbol(&engine, &id)?;
-            print_id_list(&graph, &engine.dependencies_of(&id), "no dependencies", json);
+            print_id_list(
+                &graph,
+                &engine.dependencies_of(&id),
+                "no dependencies",
+                json,
+            );
             Ok(())
         }
         QueryKind::Dependents { id } => {

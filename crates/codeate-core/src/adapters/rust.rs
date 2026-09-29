@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use crate::adapter::LanguageAdapter;
 use crate::error::{Error, Result};
-use crate::model::{Edge, EdgeKind, SyntaxEntity, SyntaxKind};
-use crate::types::TypeRef;
+use crate::model::{Edge, EdgeKind, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
+use crate::types::{type_symbol_for, TypeRef};
 
 const PRIMITIVE_TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
@@ -230,6 +230,45 @@ fn extract_generic_args(args: &syn::PathArguments, generics: &HashSet<String>) -
     }
 }
 
+/// Extract `struct_item`'s named fields as `SymbolKind::Field` symbols.
+/// Rust struct fields have no `SyntaxKind` counterpart in the Phase 3
+/// canonical model (only the symbol side has a `Field` kind), so they're
+/// extracted directly here rather than through `extract_items`.
+///
+/// Each field symbol is `DECLARES`-edged from `struct_symbol` (the
+/// struct's own `SymbolKind::Type` symbol) and `DEPENDS_ON`-edged to its
+/// resolved type's symbol -- both the field and type symbols are returned
+/// alongside those edges.
+fn extract_struct_fields(
+    struct_item: &syn::ItemStruct,
+    struct_symbol: &SymbolEntity,
+    generics: &HashSet<String>,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    let syn::Fields::Named(named) = &struct_item.fields else {
+        return (symbols, edges);
+    };
+
+    for field in &named.named {
+        let Some(ident) = &field.ident else { continue };
+
+        let field_symbol =
+            SymbolEntity::new(SymbolKind::Field, struct_symbol.id.as_str(), ident.to_string());
+        edges.push(Edge::new(struct_symbol.id.clone(), field_symbol.id.clone(), EdgeKind::Declares));
+
+        let type_ref = extract_type(&field.ty, generics);
+        let type_symbol = type_symbol_for(&type_ref);
+        edges.push(Edge::new(field_symbol.id.clone(), type_symbol.id.clone(), EdgeKind::DependsOn));
+
+        symbols.push(field_symbol);
+        symbols.push(type_symbol);
+    }
+
+    (symbols, edges)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,6 +458,56 @@ mod tests {
         };
         assert!(raw.contains("i32"));
         assert!(raw.contains("String"));
+    }
+
+    fn parse_struct(source: &str) -> (syn::ItemStruct, SymbolEntity) {
+        let file: syn::File = syn::parse_str(source).expect("valid Rust source");
+        let item_struct = file
+            .items
+            .into_iter()
+            .find_map(|item| match item {
+                syn::Item::Struct(s) => Some(s),
+                _ => None,
+            })
+            .expect("source has a struct");
+        let syntax_entity = SyntaxEntity::new(SyntaxKind::Struct, "src/lib.rs", item_struct.ident.to_string());
+        let struct_symbol =
+            SymbolEntity::new(SymbolKind::Type, syntax_entity.id.as_str(), &syntax_entity.name);
+        (item_struct, struct_symbol)
+    }
+
+    #[test]
+    fn extracts_one_field_symbol_per_named_field() {
+        let (item_struct, struct_symbol) = parse_struct("struct Point { x: i32, y: i32 }");
+
+        let (symbols, edges) = extract_struct_fields(&item_struct, &struct_symbol, &HashSet::new());
+
+        let field_symbols: Vec<&SymbolEntity> =
+            symbols.iter().filter(|s| s.kind == SymbolKind::Field).collect();
+        assert_eq!(field_symbols.len(), 2);
+        assert!(field_symbols.iter().any(|s| s.name == "x"));
+        assert!(field_symbols.iter().any(|s| s.name == "y"));
+
+        for field in &field_symbols {
+            assert!(edges.contains(&Edge::new(
+                struct_symbol.id.clone(),
+                field.id.clone(),
+                EdgeKind::Declares
+            )));
+        }
+    }
+
+    #[test]
+    fn each_field_depends_on_its_resolved_type() {
+        let (item_struct, struct_symbol) = parse_struct("struct Point { x: i32 }");
+
+        let (symbols, edges) = extract_struct_fields(&item_struct, &struct_symbol, &HashSet::new());
+
+        let x_field = symbols.iter().find(|s| s.kind == SymbolKind::Field && s.name == "x").unwrap();
+        let i32_type = type_symbol_for(&TypeRef::Primitive("i32".to_string()));
+
+        assert!(edges.contains(&Edge::new(x_field.id.clone(), i32_type.id.clone(), EdgeKind::DependsOn)));
+        assert!(symbols.iter().any(|s| s.id == i32_type.id));
     }
 
     #[test]

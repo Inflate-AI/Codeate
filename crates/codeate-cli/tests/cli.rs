@@ -77,6 +77,23 @@ fn no_args_is_a_usage_error_since_a_subcommand_is_required() {
     assert!(stderr.to_lowercase().contains("usage"));
 }
 
+/// Analyze `repo` and return the path `codeate analyze` wrote the graph to.
+/// Panics (via assert) on failure -- shared setup for query-command tests,
+/// not itself a test.
+fn analyze(repo: &TempRepo) -> PathBuf {
+    let output = codeate()
+        .arg("analyze")
+        .arg(&repo.root)
+        .output()
+        .expect("run codeate analyze");
+    assert!(
+        output.status.success(),
+        "analyze failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    repo.root.join(".codeate").join("graph.json")
+}
+
 #[test]
 fn analyze_persists_a_graph_and_prints_a_summary() {
     let repo = TempRepo::new(&[(
@@ -150,6 +167,100 @@ fn analyze_rejects_a_nonexistent_path() {
         .arg("/definitely/not/a/real/path/codeate-test")
         .output()
         .expect("run codeate analyze");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn query_symbol_finds_a_known_symbol_by_name_in_both_output_modes() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
+    let store = analyze(&repo);
+
+    let human = codeate()
+        .args(["query", "symbol", "Point", "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query symbol");
+    assert!(human.status.success());
+    let stdout = String::from_utf8(human.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("Point"));
+    assert!(stdout.contains("Type"));
+
+    let json_output = codeate()
+        .args(["query", "symbol", "Point", "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query symbol --json");
+    assert!(json_output.status.success());
+    let value: serde_json::Value =
+        serde_json::from_slice(&json_output.stdout).expect("valid json");
+    let matches = value.as_array().expect("json array");
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0]["name"], "Point");
+    assert_eq!(matches[0]["kind"], "Type");
+    assert!(matches[0]["id"].as_str().is_some());
+}
+
+#[test]
+fn query_symbol_with_no_matches_exits_zero_with_an_empty_result() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "symbol", "Nonexistent", "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query symbol");
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(value.as_array().expect("json array").len(), 0);
+}
+
+fn symbol_id(store: &std::path::Path, name: &str) -> String {
+    let output = codeate()
+        .args(["query", "symbol", name, "--store"])
+        .arg(store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query symbol");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    value.as_array().expect("json array")[0]["id"]
+        .as_str()
+        .expect("id string")
+        .to_string()
+}
+
+#[test]
+fn query_definition_follows_the_symbol_to_its_declaring_entity() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
+    let store = analyze(&repo);
+    let id = symbol_id(&store, "Point");
+
+    let output = codeate()
+        .args(["query", "definition", "--id", &id, "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query definition");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("src/lib.rs"));
+}
+
+#[test]
+fn query_definition_rejects_an_unknown_id() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "definition", "--id", "not-a-real-id", "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query definition");
 
     assert!(!output.status.success());
     assert_eq!(output.status.code(), Some(1));

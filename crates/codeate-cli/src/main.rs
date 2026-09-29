@@ -118,17 +118,83 @@ fn load_store(path: &std::path::Path) -> Result<codeate_core::StoredGraph, Strin
     codeate_core::store::load(path).map_err(|err| err.to_string())
 }
 
+fn parse_id(raw: &str) -> Result<codeate_core::EntityId, String> {
+    serde_json::from_value(serde_json::Value::String(raw.to_string()))
+        .map_err(|err| format!("invalid id '{raw}': {err}"))
+}
+
+fn symbol_json(symbol: &codeate_core::SymbolEntity) -> serde_json::Value {
+    serde_json::json!({
+        "id": symbol.id,
+        "kind": symbol.kind.as_str(),
+        "name": symbol.name,
+    })
+}
+
+fn syntax_json(entity: &codeate_core::SyntaxEntity) -> serde_json::Value {
+    serde_json::json!({
+        "id": entity.id,
+        "kind": entity.kind.as_str(),
+        "name": entity.name,
+    })
+}
+
+fn print_json(value: &serde_json::Value) {
+    println!("{}", serde_json::to_string_pretty(value).expect("value is serializable"));
+}
+
+fn cmd_symbol(engine: &codeate_core::QueryEngine, name: &str, json: bool) {
+    let matches = engine.symbols_named(name);
+    if json {
+        let value: Vec<serde_json::Value> = matches.iter().copied().map(symbol_json).collect();
+        print_json(&serde_json::Value::Array(value));
+    } else if matches.is_empty() {
+        println!("no symbols named '{name}'");
+    } else {
+        for symbol in matches {
+            println!("{}  {}  {}", symbol.id.as_str(), symbol.kind.as_str(), symbol.name);
+        }
+    }
+}
+
+fn cmd_definition(
+    engine: &codeate_core::QueryEngine,
+    id: &codeate_core::EntityId,
+    json: bool,
+) -> Result<(), String> {
+    if engine.symbol_by_id(id).is_none() {
+        return Err(format!("no symbol with id {}", id.as_str()));
+    }
+    let definition = engine.definition_of(id);
+    if json {
+        let value = definition.map(syntax_json).unwrap_or(serde_json::Value::Null);
+        print_json(&value);
+    } else {
+        match definition {
+            Some(entity) => println!(
+                "{}  {}  {}",
+                entity.id.as_str(),
+                entity.kind.as_str(),
+                entity.name
+            ),
+            None => println!("no definition found"),
+        }
+    }
+    Ok(())
+}
+
 fn run_query(args: QueryArgs) -> Result<(), String> {
     let stored = load_store(&args.store)?;
     let (graph, _integrity) = stored.into_graph();
-    let _engine = codeate_core::QueryEngine::new(&graph);
-    let _json = args.json;
+    let engine = codeate_core::QueryEngine::new(&graph);
+    let json = args.json;
 
     match args.kind {
-        QueryKind::Symbol { name } => Err(format!("query symbol {name}: not yet implemented")),
-        QueryKind::Definition { id } => {
-            Err(format!("query definition --id {id}: not yet implemented"))
+        QueryKind::Symbol { name } => {
+            cmd_symbol(&engine, &name, json);
+            Ok(())
         }
+        QueryKind::Definition { id } => cmd_definition(&engine, &parse_id(&id)?, json),
         QueryKind::Callers { id } => Err(format!("query callers --id {id}: not yet implemented")),
         QueryKind::Callees { id } => Err(format!("query callees --id {id}: not yet implemented")),
         QueryKind::Dependencies { id } => {

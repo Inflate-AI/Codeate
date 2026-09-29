@@ -139,6 +139,8 @@ name = "codeate-core"
 version = "0.1.0"
 dependencies = [
  "ignore",
+ "proc-macro2",
+ "quote",
  "serde",
  "sha2",
  "syn 2.0.119",

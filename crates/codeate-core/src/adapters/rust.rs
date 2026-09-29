@@ -1,6 +1,14 @@
+use std::collections::HashSet;
+
 use crate::adapter::LanguageAdapter;
 use crate::error::{Error, Result};
 use crate::model::{Edge, EdgeKind, SyntaxEntity, SyntaxKind};
+use crate::types::TypeRef;
+
+const PRIMITIVE_TYPES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
+    "f32", "f64", "bool", "char", "str", "String",
+];
 
 /// The Rust language adapter: parses Rust source via `syn` and maps it onto
 /// the canonical syntax model.
@@ -173,6 +181,55 @@ fn extract_body(
     }
 }
 
+/// Extract a `TypeRef` from a parsed Rust type expression. `generics` names
+/// the type parameters in scope (from the enclosing function/struct's
+/// generic parameter list, task 5) -- a bare identifier matching one of
+/// them resolves to `TypeRef::Generic` rather than `TypeRef::Named`.
+/// Anything not handled (tuples, arrays, pointers, ...) becomes
+/// `TypeRef::Unresolved` with its raw source text, never silently dropped.
+fn extract_type(ty: &syn::Type, generics: &HashSet<String>) -> TypeRef {
+    match ty {
+        syn::Type::Path(type_path) if type_path.qself.is_none() => {
+            let Some(segment) = type_path.path.segments.last() else {
+                return unresolved_type(ty);
+            };
+            let name = segment.ident.to_string();
+            let type_args = extract_generic_args(&segment.arguments, generics);
+
+            if type_args.is_empty() && generics.contains(&name) {
+                TypeRef::Generic(name)
+            } else if type_args.is_empty() && PRIMITIVE_TYPES.contains(&name.as_str()) {
+                TypeRef::Primitive(name)
+            } else {
+                TypeRef::Named { name, type_args }
+            }
+        }
+        syn::Type::Reference(type_reference) => TypeRef::Reference {
+            mutable: type_reference.mutability.is_some(),
+            inner: Box::new(extract_type(&type_reference.elem, generics)),
+        },
+        other => unresolved_type(other),
+    }
+}
+
+fn unresolved_type(ty: &syn::Type) -> TypeRef {
+    TypeRef::Unresolved(quote::quote!(#ty).to_string())
+}
+
+fn extract_generic_args(args: &syn::PathArguments, generics: &HashSet<String>) -> Vec<TypeRef> {
+    match args {
+        syn::PathArguments::AngleBracketed(angle) => angle
+            .args
+            .iter()
+            .filter_map(|arg| match arg {
+                syn::GenericArgument::Type(ty) => Some(extract_type(ty, generics)),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,6 +358,67 @@ mod tests {
 
         find(&entities, SyntaxKind::Method, "increment");
         find(&entities, SyntaxKind::Variable, "step");
+    }
+
+    fn parse_type(source: &str) -> syn::Type {
+        syn::parse_str(source).expect("valid Rust type")
+    }
+
+    #[test]
+    fn extracts_a_primitive_type() {
+        let ty = parse_type("i32");
+        assert_eq!(extract_type(&ty, &HashSet::new()), TypeRef::Primitive("i32".to_string()));
+    }
+
+    #[test]
+    fn extracts_a_user_defined_named_type() {
+        let ty = parse_type("Point");
+        assert_eq!(
+            extract_type(&ty, &HashSet::new()),
+            TypeRef::Named { name: "Point".to_string(), type_args: vec![] }
+        );
+    }
+
+    #[test]
+    fn extracts_a_generic_named_type_with_its_type_args() {
+        let ty = parse_type("Vec<i32>");
+        assert_eq!(
+            extract_type(&ty, &HashSet::new()),
+            TypeRef::Named {
+                name: "Vec".to_string(),
+                type_args: vec![TypeRef::Primitive("i32".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn extracts_a_reference_type() {
+        let ty = parse_type("&mut str");
+        assert_eq!(
+            extract_type(&ty, &HashSet::new()),
+            TypeRef::Reference {
+                mutable: true,
+                inner: Box::new(TypeRef::Primitive("str".to_string())),
+            }
+        );
+    }
+
+    #[test]
+    fn a_bare_identifier_matching_a_declared_generic_resolves_to_generic() {
+        let ty = parse_type("T");
+        let generics: HashSet<String> = ["T".to_string()].into_iter().collect();
+        assert_eq!(extract_type(&ty, &generics), TypeRef::Generic("T".to_string()));
+    }
+
+    #[test]
+    fn a_tuple_type_is_unresolved_but_keeps_its_raw_text() {
+        let ty = parse_type("(i32, String)");
+        let result = extract_type(&ty, &HashSet::new());
+        let TypeRef::Unresolved(raw) = result else {
+            panic!("expected Unresolved, got something else");
+        };
+        assert!(raw.contains("i32"));
+        assert!(raw.contains("String"));
     }
 
     #[test]

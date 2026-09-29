@@ -418,6 +418,62 @@ fn query_impact_reports_every_transitive_caller() {
 }
 
 #[test]
+fn query_entry_points_finds_main() {
+    let repo = TempRepo::new(&[("src/main.rs", "fn main() {}\nfn helper() {}")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "entry-points", "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query entry-points");
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let matches = value.as_array().expect("json array");
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0]["name"], "main");
+}
+
+#[test]
+fn query_entry_points_is_empty_but_succeeds_when_there_is_no_main() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "entry-points", "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query entry-points");
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(value.as_array().expect("json array").len(), 0);
+}
+
+#[test]
+fn query_module_tree_reflects_nesting() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub mod geometry { pub fn area() {} }")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "module-tree", "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query module-tree");
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let roots = value.as_array().expect("json array");
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0]["module"]["name"], "src/lib.rs");
+    assert_eq!(roots[0]["children"][0]["module"]["name"], "geometry");
+}
+
+#[test]
 fn query_impact_rejects_an_unknown_id() {
     let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
     let store = analyze(&repo);

@@ -206,6 +206,33 @@ fn cmd_symbol(engine: &codeate_core::QueryEngine, name: &str, json: bool) {
     print_symbol_list(&matches, &format!("no symbols named '{name}'"), json);
 }
 
+fn print_syntax_list(matches: &[&codeate_core::SyntaxEntity], empty_message: &str, json: bool) {
+    if json {
+        let value: Vec<serde_json::Value> = matches.iter().copied().map(syntax_json).collect();
+        print_json(&serde_json::Value::Array(value));
+    } else if matches.is_empty() {
+        println!("{empty_message}");
+    } else {
+        for entity in matches {
+            println!("{}  {}  {}", entity.id.as_str(), entity.kind.as_str(), entity.name);
+        }
+    }
+}
+
+fn module_tree_json(tree: &codeate_core::ModuleTree) -> serde_json::Value {
+    serde_json::json!({
+        "module": syntax_json(&tree.module),
+        "children": tree.children.iter().map(module_tree_json).collect::<Vec<_>>(),
+    })
+}
+
+fn print_module_tree(tree: &codeate_core::ModuleTree, depth: usize) {
+    println!("{}{}  {}", "  ".repeat(depth), tree.module.id.as_str(), tree.module.name);
+    for child in &tree.children {
+        print_module_tree(child, depth + 1);
+    }
+}
+
 fn cmd_definition(
     engine: &codeate_core::QueryEngine,
     id: &codeate_core::EntityId,
@@ -284,7 +311,23 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
             print_id_list(&graph, &engine.impact_of(&id), "no impact", json);
             Ok(())
         }
-        QueryKind::EntryPoints => Err("query entry-points: not yet implemented".to_string()),
-        QueryKind::ModuleTree => Err("query module-tree: not yet implemented".to_string()),
+        QueryKind::EntryPoints => {
+            print_syntax_list(&engine.entry_points(), "no entry points", json);
+            Ok(())
+        }
+        QueryKind::ModuleTree => {
+            let roots = engine.module_tree();
+            if json {
+                let value: Vec<serde_json::Value> = roots.iter().map(module_tree_json).collect();
+                print_json(&serde_json::Value::Array(value));
+            } else if roots.is_empty() {
+                println!("no modules");
+            } else {
+                for root in &roots {
+                    print_module_tree(root, 0);
+                }
+            }
+            Ok(())
+        }
     }
 }

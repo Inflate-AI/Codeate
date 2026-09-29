@@ -135,6 +135,69 @@ fn analyze_persists_a_graph_and_prints_a_summary() {
 }
 
 #[test]
+fn analyze_run_twice_reuses_the_graph_incrementally_by_default() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
+
+    let first = codeate()
+        .arg("analyze")
+        .arg(&repo.root)
+        .output()
+        .expect("run codeate analyze");
+    assert!(first.status.success());
+    let first_stdout = String::from_utf8(first.stdout).expect("utf8 stdout");
+    assert!(first_stdout.contains("analyzed fully"));
+
+    std::fs::write(
+        repo.root.join("src/lib.rs"),
+        "pub struct Point { pub x: i32 }\npub struct Line { pub a: i32 }",
+    )
+    .expect("rewrite lib.rs");
+
+    let second = codeate()
+        .arg("analyze")
+        .arg(&repo.root)
+        .output()
+        .expect("run codeate analyze again");
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8(second.stdout).expect("utf8 stdout");
+    assert!(second_stdout.contains("analyzed incrementally"));
+
+    let store_path = repo.root.join(".codeate").join("graph.json");
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&store_path).expect("read store"))
+            .expect("store is valid json");
+    let names: Vec<&str> = stored["syntax_entities"]
+        .as_array()
+        .expect("syntax_entities array")
+        .iter()
+        .map(|e| e["name"].as_str().expect("name"))
+        .collect();
+    assert!(names.contains(&"Point"));
+    assert!(names.contains(&"Line"));
+}
+
+#[test]
+fn analyze_full_flag_forces_a_full_rebuild_even_with_an_existing_graph() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
+    analyze(&repo);
+
+    let output = codeate()
+        .arg("analyze")
+        .arg(&repo.root)
+        .arg("--full")
+        .output()
+        .expect("run codeate analyze --full");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("analyzed fully"));
+}
+
+#[test]
 fn query_reports_a_clear_error_when_the_store_is_missing() {
     let output = codeate()
         .args(["query", "entry-points", "--store"])

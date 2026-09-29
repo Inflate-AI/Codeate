@@ -25,6 +25,11 @@ struct AnalyzeArgs {
     /// Where to persist the Code Graph. Defaults to `<path>/.codeate/graph.json`.
     #[arg(long)]
     out: Option<PathBuf>,
+    /// Always run the full pipeline, even if a Code Graph already exists at
+    /// the target path. By default, an existing graph is patched
+    /// incrementally (Phase 13) instead of rebuilt from scratch.
+    #[arg(long)]
+    full: bool,
 }
 
 #[derive(Args)]
@@ -112,8 +117,36 @@ fn run_analyze(args: AnalyzeArgs) -> Result<(), String> {
     let registry = codeate_core::default_registry();
     let repository =
         codeate_core::detect_languages(&repository, &registry).map_err(|err| err.to_string())?;
-    let analysis = codeate_core::analyze_repository(&repository).map_err(|err| err.to_string())?;
-    let stored = codeate_core::StoredGraph::from_analysis(&analysis);
+
+    let existing = if args.full {
+        None
+    } else if out_path.exists() {
+        Some(codeate_core::store::load(&out_path).map_err(|err| err.to_string())?)
+    } else {
+        None
+    };
+
+    let (stored, mode) = match existing {
+        Some(previous) => {
+            let (stored, report) = previous
+                .update_incremental(&repository)
+                .map_err(|err| err.to_string())?;
+            if !report.is_clean() {
+                return Err(format!(
+                    "incremental analysis produced an inconsistent graph: {report:?}"
+                ));
+            }
+            (stored, "incrementally")
+        }
+        None => {
+            let analysis =
+                codeate_core::analyze_repository(&repository).map_err(|err| err.to_string())?;
+            (
+                codeate_core::StoredGraph::from_analysis(&analysis, &repository.files),
+                "fully",
+            )
+        }
+    };
 
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -121,11 +154,11 @@ fn run_analyze(args: AnalyzeArgs) -> Result<(), String> {
     codeate_core::store::save(&out_path, &stored).map_err(|err| err.to_string())?;
 
     println!(
-        "analyzed {} files -> {} syntax entities, {} symbols, {} edges",
+        "analyzed {mode}: {} files -> {} syntax entities, {} symbols, {} edges",
         repository.files.len(),
-        analysis.syntax_entities.len(),
-        analysis.symbols.len(),
-        analysis.edges.len(),
+        stored.syntax_entities.len(),
+        stored.symbols.len(),
+        stored.edges.len(),
     );
     println!("graph written to {}", out_path.display());
 

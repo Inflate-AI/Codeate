@@ -7,9 +7,15 @@ use crate::resolve::unresolved_symbol;
 use crate::symbols::{ScopeTree, SymbolTable};
 use crate::types::{type_symbol_for, TypeRef};
 
+// Phase 6 type/field/signature/generic extraction: a complete, unit-tested
+// building-block library not yet wired into `extract()`'s own traversal or
+// exposed through `LanguageAdapter::resolve_symbols` -- Phase 9's repository
+// pipeline is the intended integration point (see TASKS.md). Kept and tested
+// as-is rather than deleted or force-wired prematurely.
+#[allow(dead_code)]
 const PRIMITIVE_TYPES: &[&str] = &[
-    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
-    "f32", "f64", "bool", "char", "str", "String",
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
+    "f64", "bool", "char", "str", "String",
 ];
 
 /// The Rust language adapter: parses Rust source via `syn` and maps it onto
@@ -31,7 +37,13 @@ impl LanguageAdapter for RustAdapter {
         let file_module = SyntaxEntity::new(SyntaxKind::Module, location, location);
         entities.push(file_module.clone());
 
-        extract_items(&ast.items, &file_module, location, &mut entities, &mut edges);
+        extract_items(
+            &ast.items,
+            &file_module,
+            location,
+            &mut entities,
+            &mut edges,
+        );
 
         (entities, edges)
     }
@@ -45,8 +57,16 @@ fn declare(
     entities: &mut Vec<SyntaxEntity>,
     edges: &mut Vec<Edge>,
 ) {
-    edges.push(Edge::new(parent.id.clone(), child.id.clone(), EdgeKind::Contains));
-    edges.push(Edge::new(parent.id.clone(), child.id.clone(), EdgeKind::Declares));
+    edges.push(Edge::new(
+        parent.id.clone(),
+        child.id.clone(),
+        EdgeKind::Contains,
+    ));
+    edges.push(Edge::new(
+        parent.id.clone(),
+        child.id.clone(),
+        EdgeKind::Declares,
+    ));
     entities.push(child);
 }
 
@@ -59,7 +79,11 @@ fn contain(
     entities: &mut Vec<SyntaxEntity>,
     edges: &mut Vec<Edge>,
 ) {
-    edges.push(Edge::new(parent.id.clone(), child.id.clone(), EdgeKind::Contains));
+    edges.push(Edge::new(
+        parent.id.clone(),
+        child.id.clone(),
+        EdgeKind::Contains,
+    ));
     entities.push(child);
 }
 
@@ -98,6 +122,21 @@ fn extract_items(
             syn::Item::Trait(item_trait) => {
                 let entity =
                     SyntaxEntity::new(SyntaxKind::Interface, scope, item_trait.ident.to_string());
+                let trait_scope = child_scope(scope, &entity.name);
+                // Declare the trait's own fn items (default-bodied or
+                // signature-only) as Method entities under the trait, so
+                // `resolve_overrides` has a concrete symbol to point an
+                // implementing method's OVERRIDES edge at.
+                for trait_item in &item_trait.items {
+                    if let syn::TraitItem::Fn(method) = trait_item {
+                        let method_entity = SyntaxEntity::new(
+                            SyntaxKind::Method,
+                            &trait_scope,
+                            method.sig.ident.to_string(),
+                        );
+                        declare(&entity, method_entity, entities, edges);
+                    }
+                }
                 declare(parent, entity, entities, edges);
             }
             syn::Item::Fn(item_fn) => {
@@ -171,11 +210,13 @@ fn extract_body(
                 }
             }
             syn::Stmt::Expr(_, Some(_semicolon)) => {
-                let entity = SyntaxEntity::new(SyntaxKind::Statement, scope, format!("stmt_{index}"));
+                let entity =
+                    SyntaxEntity::new(SyntaxKind::Statement, scope, format!("stmt_{index}"));
                 contain(parent, entity, entities, edges);
             }
             syn::Stmt::Expr(_, None) => {
-                let entity = SyntaxEntity::new(SyntaxKind::Expression, scope, format!("expr_{index}"));
+                let entity =
+                    SyntaxEntity::new(SyntaxKind::Expression, scope, format!("expr_{index}"));
                 contain(parent, entity, entities, edges);
             }
             syn::Stmt::Item(_) | syn::Stmt::Macro(_) => {}
@@ -189,6 +230,7 @@ fn extract_body(
 /// them resolves to `TypeRef::Generic` rather than `TypeRef::Named`.
 /// Anything not handled (tuples, arrays, pointers, ...) becomes
 /// `TypeRef::Unresolved` with its raw source text, never silently dropped.
+#[allow(dead_code)]
 fn extract_type(ty: &syn::Type, generics: &HashSet<String>) -> TypeRef {
     match ty {
         syn::Type::Path(type_path) if type_path.qself.is_none() => {
@@ -214,10 +256,12 @@ fn extract_type(ty: &syn::Type, generics: &HashSet<String>) -> TypeRef {
     }
 }
 
+#[allow(dead_code)]
 fn unresolved_type(ty: &syn::Type) -> TypeRef {
     TypeRef::Unresolved(quote::quote!(#ty).to_string())
 }
 
+#[allow(dead_code)]
 fn extract_generic_args(args: &syn::PathArguments, generics: &HashSet<String>) -> Vec<TypeRef> {
     match args {
         syn::PathArguments::AngleBracketed(angle) => angle
@@ -241,6 +285,7 @@ fn extract_generic_args(args: &syn::PathArguments, generics: &HashSet<String>) -
 /// struct's own `SymbolKind::Type` symbol) and `DEPENDS_ON`-edged to its
 /// resolved type's symbol -- both the field and type symbols are returned
 /// alongside those edges.
+#[allow(dead_code)]
 fn extract_struct_fields(
     struct_item: &syn::ItemStruct,
     struct_symbol: &SymbolEntity,
@@ -256,13 +301,24 @@ fn extract_struct_fields(
     for field in &named.named {
         let Some(ident) = &field.ident else { continue };
 
-        let field_symbol =
-            SymbolEntity::new(SymbolKind::Field, struct_symbol.id.as_str(), ident.to_string());
-        edges.push(Edge::new(struct_symbol.id.clone(), field_symbol.id.clone(), EdgeKind::Declares));
+        let field_symbol = SymbolEntity::new(
+            SymbolKind::Field,
+            struct_symbol.id.as_str(),
+            ident.to_string(),
+        );
+        edges.push(Edge::new(
+            struct_symbol.id.clone(),
+            field_symbol.id.clone(),
+            EdgeKind::Declares,
+        ));
 
         let type_ref = extract_type(&field.ty, generics);
         let type_symbol = type_symbol_for(&type_ref);
-        edges.push(Edge::new(field_symbol.id.clone(), type_symbol.id.clone(), EdgeKind::DependsOn));
+        edges.push(Edge::new(
+            field_symbol.id.clone(),
+            type_symbol.id.clone(),
+            EdgeKind::DependsOn,
+        ));
 
         symbols.push(field_symbol);
         symbols.push(type_symbol);
@@ -275,6 +331,7 @@ fn extract_struct_fields(
 /// from `fn_symbol` (the function/method's own `SymbolKind::Function`/
 /// `Method` symbol). A signature with no declared return type binds
 /// `RETURNS` to the unit type `()`.
+#[allow(dead_code)]
 fn extract_signature_types(
     sig: &syn::Signature,
     fn_symbol: &SymbolEntity,
@@ -287,7 +344,11 @@ fn extract_signature_types(
         if let syn::FnArg::Typed(typed) = input {
             let type_ref = extract_type(&typed.ty, generics);
             let type_symbol = type_symbol_for(&type_ref);
-            edges.push(Edge::new(fn_symbol.id.clone(), type_symbol.id.clone(), EdgeKind::Accepts));
+            edges.push(Edge::new(
+                fn_symbol.id.clone(),
+                type_symbol.id.clone(),
+                EdgeKind::Accepts,
+            ));
             symbols.push(type_symbol);
         }
     }
@@ -297,7 +358,11 @@ fn extract_signature_types(
         syn::ReturnType::Type(_, ty) => extract_type(ty, generics),
     };
     let return_symbol = type_symbol_for(&return_type);
-    edges.push(Edge::new(fn_symbol.id.clone(), return_symbol.id.clone(), EdgeKind::Returns));
+    edges.push(Edge::new(
+        fn_symbol.id.clone(),
+        return_symbol.id.clone(),
+        EdgeKind::Returns,
+    ));
     symbols.push(return_symbol);
 
     (symbols, edges)
@@ -309,6 +374,7 @@ fn extract_signature_types(
 /// names, to thread into `extract_type`/`extract_signature_types`/
 /// `extract_struct_fields` so a matching usage resolves to
 /// `TypeRef::Generic` rather than an unrelated `Named`.
+#[allow(dead_code)]
 fn extract_generic_params(
     generics: &syn::Generics,
     owner_symbol: &SymbolEntity,
@@ -321,7 +387,11 @@ fn extract_generic_params(
         if let syn::GenericParam::Type(type_param) = param {
             let name = type_param.ident.to_string();
             let symbol = SymbolEntity::new(SymbolKind::Generic, owner_symbol.id.as_str(), &name);
-            edges.push(Edge::new(owner_symbol.id.clone(), symbol.id.clone(), EdgeKind::Declares));
+            edges.push(Edge::new(
+                owner_symbol.id.clone(),
+                symbol.id.clone(),
+                EdgeKind::Declares,
+            ));
             names.insert(name);
             symbols.push(symbol);
         }
@@ -335,6 +405,10 @@ fn extract_generic_params(
 /// unhandled forms (closures, macros, ranges, ...) simply aren't descended
 /// into, which is a deliberate scope limit for this phase rather than a
 /// silent-drop of something we claimed to resolve.
+// Phase 7 reference/call/instantiate resolution: a complete, unit-tested
+// per-body resolution pass not yet wired into `LanguageAdapter::resolve_references`
+// -- Phase 9's repository pipeline is the intended integration point.
+#[allow(dead_code)]
 fn walk_expr(expr: &syn::Expr, on_path: &mut impl FnMut(&syn::ExprPath)) {
     match expr {
         syn::Expr::Path(path) => on_path(path),
@@ -391,6 +465,7 @@ fn walk_expr(expr: &syn::Expr, on_path: &mut impl FnMut(&syn::ExprPath)) {
     }
 }
 
+#[allow(dead_code)]
 fn walk_stmt(stmt: &syn::Stmt, on_path: &mut impl FnMut(&syn::ExprPath)) {
     match stmt {
         syn::Stmt::Local(local) => {
@@ -409,6 +484,7 @@ fn walk_stmt(stmt: &syn::Stmt, on_path: &mut impl FnMut(&syn::ExprPath)) {
 /// `unresolved_symbol("unknown-local", ..)` placeholder when the name isn't
 /// found in scope. Multi-segment paths (`std::process::exit`) are left to
 /// call resolution (task 3).
+#[allow(dead_code)]
 fn resolve_references(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
@@ -439,13 +515,18 @@ fn resolve_references(
                     placeholder
                 }
             };
-            edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::References));
+            edges.push(Edge::new(
+                fn_symbol.id.clone(),
+                target.id.clone(),
+                EdgeKind::References,
+            ));
         });
     }
 
     (symbols, edges)
 }
 
+#[allow(dead_code)]
 enum CallSite<'a> {
     Free(&'a syn::ExprCall),
     Method(&'a syn::ExprMethodCall),
@@ -455,6 +536,7 @@ enum CallSite<'a> {
 /// (still recursing into their receiver/args to find nested calls), rather
 /// than `syn::Expr::Path` leaves. Same deliberate non-exhaustive scope as
 /// `walk_expr`.
+#[allow(dead_code)]
 fn walk_calls<'a>(expr: &'a syn::Expr, on_call: &mut impl FnMut(CallSite<'a>)) {
     match expr {
         syn::Expr::Call(c) => {
@@ -511,6 +593,7 @@ fn walk_calls<'a>(expr: &'a syn::Expr, on_call: &mut impl FnMut(CallSite<'a>)) {
     }
 }
 
+#[allow(dead_code)]
 fn walk_calls_stmt<'a>(stmt: &'a syn::Stmt, on_call: &mut impl FnMut(CallSite<'a>)) {
     match stmt {
         syn::Stmt::Local(local) => {
@@ -531,6 +614,7 @@ fn walk_calls_stmt<'a>(stmt: &'a syn::Stmt, on_call: &mut impl FnMut(CallSite<'a
 /// symbol in `symbol_table` -- real receiver-type dispatch is out of scope
 /// for this phase (see Phase 8's `OVERRIDES`/`IMPLEMENTS`); an unmatched
 /// method name gets an explicit `"unknown-method"` placeholder.
+#[allow(dead_code)]
 fn resolve_calls(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
@@ -548,7 +632,11 @@ fn resolve_calls(
                     let raw = quote::quote!(#call_expr).to_string();
                     let placeholder = unresolved_symbol("unsupported-form", &raw);
                     symbols.push(placeholder.clone());
-                    edges.push(Edge::new(fn_symbol.id.clone(), placeholder.id.clone(), EdgeKind::Calls));
+                    edges.push(Edge::new(
+                        fn_symbol.id.clone(),
+                        placeholder.id.clone(),
+                        EdgeKind::Calls,
+                    ));
                     return;
                 };
 
@@ -556,7 +644,11 @@ fn resolve_calls(
                     let raw = quote::quote!(#path).to_string();
                     let placeholder = unresolved_symbol("external-path", &raw);
                     symbols.push(placeholder.clone());
-                    edges.push(Edge::new(fn_symbol.id.clone(), placeholder.id.clone(), EdgeKind::Calls));
+                    edges.push(Edge::new(
+                        fn_symbol.id.clone(),
+                        placeholder.id.clone(),
+                        EdgeKind::Calls,
+                    ));
                     return;
                 }
 
@@ -570,7 +662,11 @@ fn resolve_calls(
                     symbols.push(placeholder.clone());
                     placeholder
                 });
-                edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::Calls));
+                edges.push(Edge::new(
+                    fn_symbol.id.clone(),
+                    target.id.clone(),
+                    EdgeKind::Calls,
+                ));
             }
             CallSite::Method(method_call) => {
                 let name = method_call.method.to_string();
@@ -583,7 +679,11 @@ fn resolve_calls(
                     symbols.push(placeholder.clone());
                     placeholder
                 });
-                edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::Calls));
+                edges.push(Edge::new(
+                    fn_symbol.id.clone(),
+                    target.id.clone(),
+                    EdgeKind::Calls,
+                ));
             }
         });
     }
@@ -591,6 +691,7 @@ fn resolve_calls(
     (symbols, edges)
 }
 
+#[allow(dead_code)]
 enum InstantiateSite<'a> {
     StructLiteral(&'a syn::ExprStruct),
     Call(&'a syn::ExprCall),
@@ -598,6 +699,7 @@ enum InstantiateSite<'a> {
 
 /// Like `walk_calls`, but surfaces struct-literal expressions (`Point { .. }`)
 /// alongside call expressions (candidate tuple-struct constructors).
+#[allow(dead_code)]
 fn walk_instantiate_sites<'a>(expr: &'a syn::Expr, on_site: &mut impl FnMut(InstantiateSite<'a>)) {
     match expr {
         syn::Expr::Struct(s) => {
@@ -654,6 +756,7 @@ fn walk_instantiate_sites<'a>(expr: &'a syn::Expr, on_site: &mut impl FnMut(Inst
     }
 }
 
+#[allow(dead_code)]
 fn walk_instantiate_stmt<'a>(stmt: &'a syn::Stmt, on_site: &mut impl FnMut(InstantiateSite<'a>)) {
     match stmt {
         syn::Stmt::Local(local) => {
@@ -674,6 +777,7 @@ fn walk_instantiate_stmt<'a>(stmt: &'a syn::Stmt, on_site: &mut impl FnMut(Insta
 /// tuple-struct constructor when the callee resolves in scope to a `Type`
 /// symbol -- an unrecognized call is left to `resolve_calls` rather than
 /// guessed at here.
+#[allow(dead_code)]
 fn resolve_instantiates(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
@@ -687,7 +791,12 @@ fn resolve_instantiates(
     for stmt in &block.stmts {
         walk_instantiate_stmt(stmt, &mut |site| match site {
             InstantiateSite::StructLiteral(struct_expr) => {
-                let Some(name) = struct_expr.path.segments.last().map(|seg| seg.ident.to_string()) else {
+                let Some(name) = struct_expr
+                    .path
+                    .segments
+                    .last()
+                    .map(|seg| seg.ident.to_string())
+                else {
                     return;
                 };
                 let resolved = scope_tree
@@ -695,12 +804,18 @@ fn resolve_instantiates(
                     .and_then(|syntax_id| symbol_table.find_by_syntax_id(syntax_id))
                     .cloned();
                 let target = resolved.unwrap_or_else(|| {
-                    let type_symbol =
-                        type_symbol_for(&TypeRef::Named { name: name.clone(), type_args: vec![] });
+                    let type_symbol = type_symbol_for(&TypeRef::Named {
+                        name: name.clone(),
+                        type_args: vec![],
+                    });
                     symbols.push(type_symbol.clone());
                     type_symbol
                 });
-                edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::Instantiates));
+                edges.push(Edge::new(
+                    fn_symbol.id.clone(),
+                    target.id.clone(),
+                    EdgeKind::Instantiates,
+                ));
             }
             InstantiateSite::Call(call_expr) => {
                 let syn::Expr::Path(path) = call_expr.func.as_ref() else {
@@ -716,7 +831,11 @@ fn resolve_instantiates(
                     return;
                 };
                 if symbol.kind == SymbolKind::Type {
-                    edges.push(Edge::new(fn_symbol.id.clone(), symbol.id.clone(), EdgeKind::Instantiates));
+                    edges.push(Edge::new(
+                        fn_symbol.id.clone(),
+                        symbol.id.clone(),
+                        EdgeKind::Instantiates,
+                    ));
                 }
             }
         });
@@ -727,6 +846,7 @@ fn resolve_instantiates(
 
 /// Run reference, call, and instantiation resolution (tasks 2-4) over one
 /// function/method body in a single pass, combining their symbols/edges.
+#[allow(dead_code)]
 fn resolve_body(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
@@ -737,11 +857,13 @@ fn resolve_body(
     let mut symbols = Vec::new();
     let mut edges = Vec::new();
 
-    let (ref_symbols, ref_edges) = resolve_references(block, fn_symbol, scope_tree, scope, symbol_table);
+    let (ref_symbols, ref_edges) =
+        resolve_references(block, fn_symbol, scope_tree, scope, symbol_table);
     symbols.extend(ref_symbols);
     edges.extend(ref_edges);
 
-    let (call_symbols, call_edges) = resolve_calls(block, fn_symbol, scope_tree, scope, symbol_table);
+    let (call_symbols, call_edges) =
+        resolve_calls(block, fn_symbol, scope_tree, scope, symbol_table);
     symbols.extend(call_symbols);
     edges.extend(call_edges);
 
@@ -751,6 +873,359 @@ fn resolve_body(
     edges.extend(inst_edges);
 
     (symbols, edges)
+}
+
+/// The bare declared name of a resolved type, ignoring generic args and
+/// reference wrappers -- what a `SyntaxEntity`'s own `name` field holds for
+/// the struct/enum/trait it names, so it can be looked up by exact match.
+// Phase 8 structural relationship resolution (EXTENDS/IMPLEMENTS/OVERRIDES/
+// IMPORTS/EXPORTS): needs a repository-wide entity list and symbol table
+// (cross-file targets), which the per-file `LanguageAdapter` trait methods
+// can't supply -- Phase 9's repository pipeline is the intended integration
+// point, verified here via the cross-file unit tests below.
+#[allow(dead_code)]
+fn base_type_name(type_ref: &TypeRef) -> String {
+    match type_ref {
+        TypeRef::Named { name, .. } => name.clone(),
+        TypeRef::Primitive(name) | TypeRef::Generic(name) => name.clone(),
+        TypeRef::Reference { inner, .. } => base_type_name(inner),
+        TypeRef::Unresolved(raw) => raw.clone(),
+    }
+}
+
+#[allow(dead_code)]
+fn find_entity_by_kinds_name<'a>(
+    entities: &'a [SyntaxEntity],
+    kinds: &[SyntaxKind],
+    name: &str,
+) -> Option<&'a SyntaxEntity> {
+    entities
+        .iter()
+        .find(|e| kinds.contains(&e.kind) && e.name == name)
+}
+
+#[allow(dead_code)]
+fn last_segment_name(path: &syn::Path) -> Option<String> {
+    path.segments
+        .last()
+        .map(|segment| segment.ident.to_string())
+}
+
+/// Resolve an `impl Trait for Type` block into an `IMPLEMENTS` edge from the
+/// implementing type's symbol to the trait's symbol. Inherent impls
+/// (`impl Type { .. }`, no `for Trait`) produce nothing -- there's no trait
+/// to implement. Either side may be external to this repository (a trait
+/// from a dependency, or -- unusually -- an impl on a foreign type); such a
+/// side resolves to an explicit `unresolved_symbol` placeholder rather than
+/// being dropped.
+#[allow(dead_code)]
+fn resolve_implements(
+    item_impl: &syn::ItemImpl,
+    entities: &[SyntaxEntity],
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    let Some((_, trait_path, _)) = &item_impl.trait_ else {
+        return (symbols, edges);
+    };
+    let Some(trait_name) = last_segment_name(trait_path) else {
+        return (symbols, edges);
+    };
+
+    let self_name = base_type_name(&extract_type(&item_impl.self_ty, &HashSet::new()));
+
+    let self_symbol = find_entity_by_kinds_name(
+        entities,
+        &[SyntaxKind::Struct, SyntaxKind::Enum],
+        &self_name,
+    )
+    .and_then(|e| symbol_table.find_by_syntax_id(&e.id))
+    .cloned()
+    .unwrap_or_else(|| {
+        let placeholder = unresolved_symbol("external-type", &self_name);
+        symbols.push(placeholder.clone());
+        placeholder
+    });
+
+    let trait_symbol = find_entity_by_kinds_name(entities, &[SyntaxKind::Interface], &trait_name)
+        .and_then(|e| symbol_table.find_by_syntax_id(&e.id))
+        .cloned()
+        .unwrap_or_else(|| {
+            let placeholder = unresolved_symbol("external-trait", &trait_name);
+            symbols.push(placeholder.clone());
+            placeholder
+        });
+
+    edges.push(Edge::new(
+        self_symbol.id,
+        trait_symbol.id,
+        EdgeKind::Implements,
+    ));
+
+    (symbols, edges)
+}
+
+/// Resolve a trait's supertrait bounds (`trait Sub: Super`) into `EXTENDS`
+/// edges from `Sub`'s symbol to each `Super`'s symbol. A supertrait outside
+/// this repository resolves to an explicit `unresolved_symbol` placeholder.
+#[allow(dead_code)]
+fn resolve_supertraits(
+    item_trait: &syn::ItemTrait,
+    entities: &[SyntaxEntity],
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    let trait_name = item_trait.ident.to_string();
+    let Some(trait_symbol) =
+        find_entity_by_kinds_name(entities, &[SyntaxKind::Interface], &trait_name)
+            .and_then(|e| symbol_table.find_by_syntax_id(&e.id))
+    else {
+        return (symbols, edges);
+    };
+
+    for bound in &item_trait.supertraits {
+        let syn::TypeParamBound::Trait(trait_bound) = bound else {
+            continue;
+        };
+        let Some(super_name) = last_segment_name(&trait_bound.path) else {
+            continue;
+        };
+
+        let super_symbol =
+            find_entity_by_kinds_name(entities, &[SyntaxKind::Interface], &super_name)
+                .and_then(|e| symbol_table.find_by_syntax_id(&e.id))
+                .cloned()
+                .unwrap_or_else(|| {
+                    let placeholder = unresolved_symbol("external-trait", &super_name);
+                    symbols.push(placeholder.clone());
+                    placeholder
+                });
+
+        edges.push(Edge::new(
+            trait_symbol.id.clone(),
+            super_symbol.id,
+            EdgeKind::Extends,
+        ));
+    }
+
+    (symbols, edges)
+}
+
+/// Resolve one trait-impl method's `OVERRIDES` edge to the trait's own
+/// declaration of that method (by name, under the specific trait entity --
+/// not a repo-wide name match). `impl_method_symbol` is the already-resolved
+/// symbol for the impl's method (Phase 5). A method with no trait-side
+/// counterpart (an inherent-only addition alongside the trait impl) produces
+/// no edge; a trait outside this repository produces an explicit
+/// `unresolved_symbol` placeholder rather than silence.
+#[allow(dead_code)]
+fn resolve_overrides(
+    method_name: &str,
+    impl_method_symbol: &SymbolEntity,
+    trait_name: &str,
+    entities: &[SyntaxEntity],
+    edges: &[Edge],
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut out_edges = Vec::new();
+
+    let Some(trait_entity) =
+        find_entity_by_kinds_name(entities, &[SyntaxKind::Interface], trait_name)
+    else {
+        let placeholder = unresolved_symbol(
+            "external-trait-method",
+            &format!("{trait_name}::{method_name}"),
+        );
+        symbols.push(placeholder.clone());
+        out_edges.push(Edge::new(
+            impl_method_symbol.id.clone(),
+            placeholder.id.clone(),
+            EdgeKind::Overrides,
+        ));
+        return (symbols, out_edges);
+    };
+
+    let trait_method_symbol = edges
+        .iter()
+        .filter(|e| e.kind == EdgeKind::Declares && e.from == trait_entity.id)
+        .filter_map(|e| entities.iter().find(|ent| ent.id == e.to))
+        .find(|ent| ent.kind == SyntaxKind::Method && ent.name == method_name)
+        .and_then(|ent| symbol_table.find_by_syntax_id(&ent.id));
+
+    if let Some(trait_method_symbol) = trait_method_symbol {
+        out_edges.push(Edge::new(
+            impl_method_symbol.id.clone(),
+            trait_method_symbol.id.clone(),
+            EdgeKind::Overrides,
+        ));
+    }
+
+    (symbols, out_edges)
+}
+
+/// Collect every leaf path a `use` tree names, as its full dotted segments
+/// (`use a::{b, c::d}` yields `[a, b]` and `[a, c, d]`). A glob (`use a::*`)
+/// yields `[a, *]`, resolved as an explicit `glob-import` placeholder by the
+/// caller rather than silently expanded.
+#[allow(dead_code)]
+fn collect_use_paths(tree: &syn::UseTree, prefix: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+    match tree {
+        syn::UseTree::Path(path) => {
+            prefix.push(path.ident.to_string());
+            collect_use_paths(&path.tree, prefix, out);
+            prefix.pop();
+        }
+        syn::UseTree::Name(name) => {
+            let mut full = prefix.clone();
+            full.push(name.ident.to_string());
+            out.push(full);
+        }
+        syn::UseTree::Rename(rename) => {
+            // Resolution targets the original item, not the local alias.
+            let mut full = prefix.clone();
+            full.push(rename.ident.to_string());
+            out.push(full);
+        }
+        syn::UseTree::Glob(_) => {
+            let mut full = prefix.clone();
+            full.push("*".to_string());
+            out.push(full);
+        }
+        syn::UseTree::Group(group) => {
+            for item in &group.items {
+                collect_use_paths(item, prefix, out);
+            }
+        }
+    }
+}
+
+/// Resolve a file's `use` statements into `IMPORTS` edges from `module_symbol`.
+/// A path rooted at `crate`/`self`/`super` is local to this repository and
+/// resolved against `entities`; anything else (an external crate, `std`
+/// included) resolves to an explicit `external-crate` placeholder. A local
+/// path that doesn't resolve to any declared item gets its own explicit
+/// `unresolved-local-import` placeholder.
+#[allow(dead_code)]
+fn resolve_imports(
+    ast: &syn::File,
+    module_symbol: &SymbolEntity,
+    entities: &[SyntaxEntity],
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    const IMPORTABLE_KINDS: [SyntaxKind; 4] = [
+        SyntaxKind::Struct,
+        SyntaxKind::Enum,
+        SyntaxKind::Interface,
+        SyntaxKind::Function,
+    ];
+
+    for item in &ast.items {
+        let syn::Item::Use(item_use) = item else {
+            continue;
+        };
+        let mut paths = Vec::new();
+        collect_use_paths(&item_use.tree, &mut Vec::new(), &mut paths);
+
+        for segments in paths {
+            let joined = segments.join("::");
+            let is_local = matches!(
+                segments.first().map(String::as_str),
+                Some("crate") | Some("self") | Some("super")
+            );
+            let item_name = segments.last().cloned().unwrap_or_default();
+
+            let target = if item_name == "*" {
+                let placeholder = unresolved_symbol("glob-import", &joined);
+                symbols.push(placeholder.clone());
+                placeholder
+            } else if is_local {
+                find_entity_by_kinds_name(entities, &IMPORTABLE_KINDS, &item_name)
+                    .and_then(|e| symbol_table.find_by_syntax_id(&e.id))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        let placeholder = unresolved_symbol("unresolved-local-import", &joined);
+                        symbols.push(placeholder.clone());
+                        placeholder
+                    })
+            } else {
+                let placeholder = unresolved_symbol("external-crate", &joined);
+                symbols.push(placeholder.clone());
+                placeholder
+            };
+
+            edges.push(Edge::new(
+                module_symbol.id.clone(),
+                target.id,
+                EdgeKind::Imports,
+            ));
+        }
+    }
+
+    (symbols, edges)
+}
+
+/// Resolve a file's `pub` top-level items into `EXPORTS` edges from
+/// `module_symbol`. Only items with a Phase 3 syntax counterpart (struct,
+/// enum, trait, function) are considered; every exported item is by
+/// definition declared in this file, so there's no unresolved case here.
+#[allow(dead_code)]
+fn resolve_exports(
+    ast: &syn::File,
+    module_symbol: &SymbolEntity,
+    entities: &[SyntaxEntity],
+    symbol_table: &SymbolTable,
+) -> Vec<Edge> {
+    let mut edges = Vec::new();
+
+    for item in &ast.items {
+        let (vis, kind, name) = match item {
+            syn::Item::Fn(item_fn) => (
+                &item_fn.vis,
+                SyntaxKind::Function,
+                item_fn.sig.ident.to_string(),
+            ),
+            syn::Item::Struct(item_struct) => (
+                &item_struct.vis,
+                SyntaxKind::Struct,
+                item_struct.ident.to_string(),
+            ),
+            syn::Item::Enum(item_enum) => (
+                &item_enum.vis,
+                SyntaxKind::Enum,
+                item_enum.ident.to_string(),
+            ),
+            syn::Item::Trait(item_trait) => (
+                &item_trait.vis,
+                SyntaxKind::Interface,
+                item_trait.ident.to_string(),
+            ),
+            _ => continue,
+        };
+
+        if !matches!(vis, syn::Visibility::Public(_)) {
+            continue;
+        }
+
+        if let Some(symbol) = find_entity_by_kinds_name(entities, &[kind], &name)
+            .and_then(|e| symbol_table.find_by_syntax_id(&e.id))
+        {
+            edges.push(Edge::new(
+                module_symbol.id.clone(),
+                symbol.id.clone(),
+                EdgeKind::Exports,
+            ));
+        }
+    }
+
+    edges
 }
 
 #[cfg(test)]
@@ -794,8 +1269,16 @@ mod tests {
         let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
         let point = find(&entities, SyntaxKind::Struct, "Point");
 
-        assert!(edges.contains(&Edge::new(module.id.clone(), point.id.clone(), EdgeKind::Contains)));
-        assert!(edges.contains(&Edge::new(module.id.clone(), point.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            module.id.clone(),
+            point.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(edges.contains(&Edge::new(
+            module.id.clone(),
+            point.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -818,11 +1301,23 @@ mod tests {
         let a = find(&entities, SyntaxKind::Parameter, "a");
         let b = find(&entities, SyntaxKind::Parameter, "b");
 
-        assert!(edges.contains(&Edge::new(function.id.clone(), a.id.clone(), EdgeKind::Contains)));
-        assert!(edges.contains(&Edge::new(function.id.clone(), b.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(
+            function.id.clone(),
+            a.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(edges.contains(&Edge::new(
+            function.id.clone(),
+            b.id.clone(),
+            EdgeKind::Contains
+        )));
         // Parameters are contained by their function, but not separately
         // "declared" by it the way top-level items are.
-        assert!(!edges.contains(&Edge::new(function.id.clone(), a.id.clone(), EdgeKind::Declares)));
+        assert!(!edges.contains(&Edge::new(
+            function.id.clone(),
+            a.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -833,7 +1328,9 @@ mod tests {
         let method = find(&entities, SyntaxKind::Method, "increment");
         assert_eq!(method.kind, SyntaxKind::Method);
         find(&entities, SyntaxKind::Parameter, "by");
-        assert!(!entities.iter().any(|e| e.kind == SyntaxKind::Parameter && e.name == "self"));
+        assert!(!entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Parameter && e.name == "self"));
     }
 
     #[test]
@@ -845,9 +1342,21 @@ mod tests {
         let shapes = find(&entities, SyntaxKind::Module, "shapes");
         let circle = find(&entities, SyntaxKind::Struct, "Circle");
 
-        assert!(edges.contains(&Edge::new(file_module.id.clone(), shapes.id.clone(), EdgeKind::Contains)));
-        assert!(edges.contains(&Edge::new(shapes.id.clone(), circle.id.clone(), EdgeKind::Contains)));
-        assert!(!edges.contains(&Edge::new(file_module.id.clone(), circle.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(
+            file_module.id.clone(),
+            shapes.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(edges.contains(&Edge::new(
+            shapes.id.clone(),
+            circle.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(!edges.contains(&Edge::new(
+            file_module.id.clone(),
+            circle.id.clone(),
+            EdgeKind::Contains
+        )));
     }
 
     #[test]
@@ -858,8 +1367,16 @@ mod tests {
         let count = find(&entities, SyntaxKind::Variable, "count");
         let total = find(&entities, SyntaxKind::Variable, "total");
 
-        assert!(edges.contains(&Edge::new(function.id.clone(), count.id.clone(), EdgeKind::Contains)));
-        assert!(edges.contains(&Edge::new(function.id.clone(), total.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(
+            function.id.clone(),
+            count.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(edges.contains(&Edge::new(
+            function.id.clone(),
+            total.id.clone(),
+            EdgeKind::Contains
+        )));
     }
 
     #[test]
@@ -870,8 +1387,16 @@ mod tests {
         let statement = find(&entities, SyntaxKind::Statement, "stmt_1");
         let tail_expr = find(&entities, SyntaxKind::Expression, "expr_2");
 
-        assert!(edges.contains(&Edge::new(function.id.clone(), statement.id.clone(), EdgeKind::Contains)));
-        assert!(edges.contains(&Edge::new(function.id.clone(), tail_expr.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(
+            function.id.clone(),
+            statement.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(edges.contains(&Edge::new(
+            function.id.clone(),
+            tail_expr.id.clone(),
+            EdgeKind::Contains
+        )));
     }
 
     #[test]
@@ -890,7 +1415,10 @@ mod tests {
     #[test]
     fn extracts_a_primitive_type() {
         let ty = parse_type("i32");
-        assert_eq!(extract_type(&ty, &HashSet::new()), TypeRef::Primitive("i32".to_string()));
+        assert_eq!(
+            extract_type(&ty, &HashSet::new()),
+            TypeRef::Primitive("i32".to_string())
+        );
     }
 
     #[test]
@@ -898,7 +1426,10 @@ mod tests {
         let ty = parse_type("Point");
         assert_eq!(
             extract_type(&ty, &HashSet::new()),
-            TypeRef::Named { name: "Point".to_string(), type_args: vec![] }
+            TypeRef::Named {
+                name: "Point".to_string(),
+                type_args: vec![]
+            }
         );
     }
 
@@ -930,7 +1461,10 @@ mod tests {
     fn a_bare_identifier_matching_a_declared_generic_resolves_to_generic() {
         let ty = parse_type("T");
         let generics: HashSet<String> = ["T".to_string()].into_iter().collect();
-        assert_eq!(extract_type(&ty, &generics), TypeRef::Generic("T".to_string()));
+        assert_eq!(
+            extract_type(&ty, &generics),
+            TypeRef::Generic("T".to_string())
+        );
     }
 
     #[test]
@@ -954,9 +1488,16 @@ mod tests {
                 _ => None,
             })
             .expect("source has a struct");
-        let syntax_entity = SyntaxEntity::new(SyntaxKind::Struct, "src/lib.rs", item_struct.ident.to_string());
-        let struct_symbol =
-            SymbolEntity::new(SymbolKind::Type, syntax_entity.id.as_str(), &syntax_entity.name);
+        let syntax_entity = SyntaxEntity::new(
+            SyntaxKind::Struct,
+            "src/lib.rs",
+            item_struct.ident.to_string(),
+        );
+        let struct_symbol = SymbolEntity::new(
+            SymbolKind::Type,
+            syntax_entity.id.as_str(),
+            &syntax_entity.name,
+        );
         (item_struct, struct_symbol)
     }
 
@@ -966,8 +1507,10 @@ mod tests {
 
         let (symbols, edges) = extract_struct_fields(&item_struct, &struct_symbol, &HashSet::new());
 
-        let field_symbols: Vec<&SymbolEntity> =
-            symbols.iter().filter(|s| s.kind == SymbolKind::Field).collect();
+        let field_symbols: Vec<&SymbolEntity> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Field)
+            .collect();
         assert_eq!(field_symbols.len(), 2);
         assert!(field_symbols.iter().any(|s| s.name == "x"));
         assert!(field_symbols.iter().any(|s| s.name == "y"));
@@ -987,10 +1530,17 @@ mod tests {
 
         let (symbols, edges) = extract_struct_fields(&item_struct, &struct_symbol, &HashSet::new());
 
-        let x_field = symbols.iter().find(|s| s.kind == SymbolKind::Field && s.name == "x").unwrap();
+        let x_field = symbols
+            .iter()
+            .find(|s| s.kind == SymbolKind::Field && s.name == "x")
+            .unwrap();
         let i32_type = type_symbol_for(&TypeRef::Primitive("i32".to_string()));
 
-        assert!(edges.contains(&Edge::new(x_field.id.clone(), i32_type.id.clone(), EdgeKind::DependsOn)));
+        assert!(edges.contains(&Edge::new(
+            x_field.id.clone(),
+            i32_type.id.clone(),
+            EdgeKind::DependsOn
+        )));
         assert!(symbols.iter().any(|s| s.id == i32_type.id));
     }
 
@@ -1004,9 +1554,16 @@ mod tests {
                 _ => None,
             })
             .expect("source has a fn");
-        let syntax_entity = SyntaxEntity::new(SyntaxKind::Function, "src/lib.rs", item_fn.sig.ident.to_string());
-        let fn_symbol =
-            SymbolEntity::new(SymbolKind::Function, syntax_entity.id.as_str(), &syntax_entity.name);
+        let syntax_entity = SyntaxEntity::new(
+            SyntaxKind::Function,
+            "src/lib.rs",
+            item_fn.sig.ident.to_string(),
+        );
+        let fn_symbol = SymbolEntity::new(
+            SymbolKind::Function,
+            syntax_entity.id.as_str(),
+            &syntax_entity.name,
+        );
         (item_fn.sig, fn_symbol)
     }
 
@@ -1019,7 +1576,9 @@ mod tests {
         let i32_type = type_symbol_for(&TypeRef::Primitive("i32".to_string()));
         let accepts_count = edges
             .iter()
-            .filter(|e| e.kind == EdgeKind::Accepts && e.from == fn_symbol.id && e.to == i32_type.id)
+            .filter(|e| {
+                e.kind == EdgeKind::Accepts && e.from == fn_symbol.id && e.to == i32_type.id
+            })
             .count();
         // Both `a` and `b` are i32, so the same type symbol is ACCEPTS-edged twice.
         assert_eq!(accepts_count, 2);
@@ -1032,15 +1591,24 @@ mod tests {
 
         let (_symbols, edges) = extract_signature_types(&sig, &fn_symbol, &HashSet::new());
 
-        let point_type = type_symbol_for(&TypeRef::Named { name: "Point".to_string(), type_args: vec![] });
-        assert!(edges.contains(&Edge::new(fn_symbol.id.clone(), point_type.id.clone(), EdgeKind::Returns)));
+        let point_type = type_symbol_for(&TypeRef::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        });
+        assert!(edges.contains(&Edge::new(
+            fn_symbol.id.clone(),
+            point_type.id.clone(),
+            EdgeKind::Returns
+        )));
     }
 
     #[test]
     fn extracts_a_generic_parameter_and_threads_it_into_signature_type_binding() {
         let (sig, fn_symbol) = parse_fn("fn identity<T>(x: T) -> T { x }");
         let file: syn::File = syn::parse_str("fn identity<T>(x: T) -> T { x }").unwrap();
-        let syn::Item::Fn(item_fn) = &file.items[0] else { unreachable!() };
+        let syn::Item::Fn(item_fn) = &file.items[0] else {
+            unreachable!()
+        };
 
         let (generic_symbols, generic_edges, names) =
             extract_generic_params(&item_fn.sig.generics, &fn_symbol);
@@ -1049,23 +1617,42 @@ mod tests {
         let t_symbol = &generic_symbols[0];
         assert_eq!(t_symbol.kind, SymbolKind::Generic);
         assert_eq!(t_symbol.name, "T");
-        assert!(generic_edges.contains(&Edge::new(fn_symbol.id.clone(), t_symbol.id.clone(), EdgeKind::Declares)));
+        assert!(generic_edges.contains(&Edge::new(
+            fn_symbol.id.clone(),
+            t_symbol.id.clone(),
+            EdgeKind::Declares
+        )));
 
         let (_type_symbols, sig_edges) = extract_signature_types(&sig, &fn_symbol, &names);
         let generic_type = type_symbol_for(&TypeRef::Generic("T".to_string()));
 
-        assert!(sig_edges.contains(&Edge::new(fn_symbol.id.clone(), generic_type.id.clone(), EdgeKind::Accepts)));
-        assert!(sig_edges.contains(&Edge::new(fn_symbol.id.clone(), generic_type.id.clone(), EdgeKind::Returns)));
+        assert!(sig_edges.contains(&Edge::new(
+            fn_symbol.id.clone(),
+            generic_type.id.clone(),
+            EdgeKind::Accepts
+        )));
+        assert!(sig_edges.contains(&Edge::new(
+            fn_symbol.id.clone(),
+            generic_type.id.clone(),
+            EdgeKind::Returns
+        )));
     }
 
     #[test]
     fn an_unresolvable_type_still_produces_an_explicit_unresolved_type_symbol() {
-        let (sig, fn_symbol) = parse_fn("fn describe() -> dyn std::fmt::Debug { unimplemented!() }");
+        let (sig, fn_symbol) =
+            parse_fn("fn describe() -> dyn std::fmt::Debug { unimplemented!() }");
 
         let (symbols, edges) = extract_signature_types(&sig, &fn_symbol, &HashSet::new());
 
-        let returns_edge = edges.iter().find(|e| e.kind == EdgeKind::Returns).expect("a RETURNS edge");
-        let return_symbol = symbols.iter().find(|s| s.id == returns_edge.to).expect("return type symbol present");
+        let returns_edge = edges
+            .iter()
+            .find(|e| e.kind == EdgeKind::Returns)
+            .expect("a RETURNS edge");
+        let return_symbol = symbols
+            .iter()
+            .find(|s| s.id == returns_edge.to)
+            .expect("return type symbol present");
         // Not silently dropped: it's a real, present Type symbol, just not
         // one of the classified variants -- an explicit Unresolved.
         assert_eq!(return_symbol.kind, SymbolKind::Type);
@@ -1079,7 +1666,11 @@ mod tests {
         let (_symbols, edges) = extract_signature_types(&sig, &fn_symbol, &HashSet::new());
 
         let unit_type = type_symbol_for(&TypeRef::Primitive("()".to_string()));
-        assert!(edges.contains(&Edge::new(fn_symbol.id.clone(), unit_type.id.clone(), EdgeKind::Returns)));
+        assert!(edges.contains(&Edge::new(
+            fn_symbol.id.clone(),
+            unit_type.id.clone(),
+            EdgeKind::Returns
+        )));
     }
 
     fn parse_fn_block(source: &str) -> syn::Block {
@@ -1103,8 +1694,14 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
-        let count_symbol = symbol_table.find_by_syntax_id(&count_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
+        let count_symbol = symbol_table
+            .find_by_syntax_id(&count_syntax.id)
+            .unwrap()
+            .clone();
 
         let block = parse_fn_block(source);
         let (_symbols, ref_edges) =
@@ -1129,13 +1726,18 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
 
         let block = parse_fn_block(source);
         let (symbols, ref_edges) =
             resolve_references(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
 
-        let placeholder = symbols.first().expect("an unresolved placeholder was created");
+        let placeholder = symbols
+            .first()
+            .expect("an unresolved placeholder was created");
         assert_eq!(placeholder.name, "unknown-local:missing_name");
         assert!(ref_edges.contains(&Edge::new(
             run_symbol.id.clone(),
@@ -1157,8 +1759,14 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
-        let helper_symbol = symbol_table.find_by_syntax_id(&helper_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
+        let helper_symbol = symbol_table
+            .find_by_syntax_id(&helper_syntax.id)
+            .unwrap()
+            .clone();
 
         let block = parse_fn_block("fn run() { helper() }");
         let (_symbols, call_edges) =
@@ -1175,7 +1783,8 @@ mod tests {
     fn resolves_a_method_call_by_best_effort_name_match() {
         use crate::symbols::build_symbol_table;
 
-        let source = "struct Counter; impl Counter { fn increment(&mut self) {} } fn run(c: Counter) {}";
+        let source =
+            "struct Counter; impl Counter { fn increment(&mut self) {} } fn run(c: Counter) {}";
         let (entities, edges) = extract(source);
         let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
         let run_syntax = find(&entities, SyntaxKind::Function, "run");
@@ -1184,8 +1793,14 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
-        let increment_symbol = symbol_table.find_by_syntax_id(&increment_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
+        let increment_symbol = symbol_table
+            .find_by_syntax_id(&increment_syntax.id)
+            .unwrap()
+            .clone();
 
         let block = parse_fn_block("fn run(mut c: Counter) { c.increment() }");
         let (_symbols, call_edges) =
@@ -1210,13 +1825,18 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
 
         let block = parse_fn_block("fn run() { std::process::exit(1) }");
         let (symbols, call_edges) =
             resolve_calls(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
 
-        let placeholder = symbols.first().expect("an unresolved placeholder was created");
+        let placeholder = symbols
+            .first()
+            .expect("an unresolved placeholder was created");
         assert!(placeholder.name.starts_with("external-path:"));
         assert!(call_edges.contains(&Edge::new(
             run_symbol.id.clone(),
@@ -1238,8 +1858,14 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
-        let point_symbol = symbol_table.find_by_syntax_id(&point_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
+        let point_symbol = symbol_table
+            .find_by_syntax_id(&point_syntax.id)
+            .unwrap()
+            .clone();
 
         let block = parse_fn_block("fn run() { Point { x: 1, y: 2 } }");
         let (_symbols, inst_edges) =
@@ -1265,8 +1891,14 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
-        let meters_symbol = symbol_table.find_by_syntax_id(&meters_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
+        let meters_symbol = symbol_table
+            .find_by_syntax_id(&meters_syntax.id)
+            .unwrap()
+            .clone();
 
         let block = parse_fn_block("fn run() { Meters(1.0) }");
         let (_symbols, inst_edges) =
@@ -1293,9 +1925,18 @@ mod tests {
         let scope_tree = ScopeTree::build(module, &entities, &edges);
         let symbol_table = build_symbol_table(&entities);
         let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
-        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
-        let helper_symbol = symbol_table.find_by_syntax_id(&helper_syntax.id).unwrap().clone();
-        let point_symbol = symbol_table.find_by_syntax_id(&point_syntax.id).unwrap().clone();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
+        let helper_symbol = symbol_table
+            .find_by_syntax_id(&helper_syntax.id)
+            .unwrap()
+            .clone();
+        let point_symbol = symbol_table
+            .find_by_syntax_id(&point_syntax.id)
+            .unwrap()
+            .clone();
 
         let body_source = "fn run() { \
             let p = Point { x: 1, y: 2 }; \
@@ -1309,7 +1950,11 @@ mod tests {
             resolve_body(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
 
         // CALLS: helper() resolves; std::process::exit(0) gets a placeholder.
-        assert!(body_edges.contains(&Edge::new(run_symbol.id.clone(), helper_symbol.id.clone(), EdgeKind::Calls)));
+        assert!(body_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            helper_symbol.id.clone(),
+            EdgeKind::Calls
+        )));
         let external_placeholder = symbols
             .iter()
             .find(|s| s.name.starts_with("external-path:"))
@@ -1360,5 +2005,539 @@ mod tests {
 
         assert_eq!(points.len(), 2);
         assert_ne!(points[0].id, points[1].id);
+    }
+
+    fn parse_item_impl(source: &str) -> syn::ItemImpl {
+        let file: syn::File = syn::parse_str(source).expect("valid Rust source");
+        file.items
+            .into_iter()
+            .find_map(|item| match item {
+                syn::Item::Impl(item_impl) => Some(item_impl),
+                _ => None,
+            })
+            .expect("source has an impl")
+    }
+
+    fn parse_item_trait(source: &str, name: &str) -> syn::ItemTrait {
+        let file: syn::File = syn::parse_str(source).expect("valid Rust source");
+        file.items
+            .into_iter()
+            .find_map(|item| match item {
+                syn::Item::Trait(item_trait) if item_trait.ident == name => Some(item_trait),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("source has a trait named {name}"))
+    }
+
+    #[test]
+    fn resolves_implements_from_a_local_trait_impl() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "trait Shape { fn area(&self) -> f64; } struct Circle;";
+        let (entities, _edges) = extract(source);
+        let symbol_table = build_symbol_table(&entities);
+        let circle = find(&entities, SyntaxKind::Struct, "Circle");
+        let shape = find(&entities, SyntaxKind::Interface, "Shape");
+        let circle_symbol = symbol_table.find_by_syntax_id(&circle.id).unwrap().clone();
+        let shape_symbol = symbol_table.find_by_syntax_id(&shape.id).unwrap().clone();
+
+        let item_impl = parse_item_impl("impl Shape for Circle { fn area(&self) -> f64 { 0.0 } }");
+        let (_symbols, edges) = resolve_implements(&item_impl, &entities, &symbol_table);
+
+        assert!(edges.contains(&Edge::new(
+            circle_symbol.id,
+            shape_symbol.id,
+            EdgeKind::Implements
+        )));
+    }
+
+    #[test]
+    fn an_inherent_impl_produces_no_implements_edge() {
+        use crate::symbols::build_symbol_table;
+
+        let (entities, _edges) = extract("struct Counter;");
+        let symbol_table = build_symbol_table(&entities);
+
+        let item_impl = parse_item_impl("impl Counter { fn increment(&mut self) {} }");
+        let (_symbols, edges) = resolve_implements(&item_impl, &entities, &symbol_table);
+
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn implementing_an_external_trait_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let (entities, _edges) = extract("struct Circle;");
+        let symbol_table = build_symbol_table(&entities);
+        let circle = find(&entities, SyntaxKind::Struct, "Circle");
+        let circle_symbol = symbol_table.find_by_syntax_id(&circle.id).unwrap().clone();
+
+        let item_impl = parse_item_impl("impl std::fmt::Debug for Circle { }");
+        let (symbols, edges) = resolve_implements(&item_impl, &entities, &symbol_table);
+
+        let placeholder = symbols
+            .iter()
+            .find(|s| s.name.starts_with("external-trait:"))
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            circle_symbol.id,
+            placeholder.id.clone(),
+            EdgeKind::Implements
+        )));
+    }
+
+    #[test]
+    fn resolves_extends_from_a_local_supertrait() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "trait Super {} trait Sub: Super {}";
+        let (entities, _edges) = extract(source);
+        let symbol_table = build_symbol_table(&entities);
+        let super_entity = find(&entities, SyntaxKind::Interface, "Super");
+        let sub_entity = find(&entities, SyntaxKind::Interface, "Sub");
+        let super_symbol = symbol_table
+            .find_by_syntax_id(&super_entity.id)
+            .unwrap()
+            .clone();
+        let sub_symbol = symbol_table
+            .find_by_syntax_id(&sub_entity.id)
+            .unwrap()
+            .clone();
+
+        let item_trait = parse_item_trait(source, "Sub");
+        let (_symbols, edges) = resolve_supertraits(&item_trait, &entities, &symbol_table);
+
+        assert!(edges.contains(&Edge::new(
+            sub_symbol.id,
+            super_symbol.id,
+            EdgeKind::Extends
+        )));
+    }
+
+    #[test]
+    fn extending_an_external_supertrait_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "trait Sub: std::fmt::Debug {}";
+        let (entities, _edges) = extract(source);
+        let symbol_table = build_symbol_table(&entities);
+        let sub_entity = find(&entities, SyntaxKind::Interface, "Sub");
+        let sub_symbol = symbol_table
+            .find_by_syntax_id(&sub_entity.id)
+            .unwrap()
+            .clone();
+
+        let item_trait = parse_item_trait(source, "Sub");
+        let (symbols, edges) = resolve_supertraits(&item_trait, &entities, &symbol_table);
+
+        let placeholder = symbols
+            .iter()
+            .find(|s| s.name.starts_with("external-trait:"))
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            sub_symbol.id,
+            placeholder.id.clone(),
+            EdgeKind::Extends
+        )));
+    }
+
+    #[test]
+    fn resolves_overrides_for_a_method_matching_the_trait_declaration() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "trait Shape { fn area(&self) -> f64; } struct Circle;";
+        let (entities, edges) = extract(source);
+        let symbol_table = build_symbol_table(&entities);
+
+        // The impl's own method entity, extracted the same way `extract_items`
+        // would for `impl Shape for Circle { fn area(&self) -> f64 { 0.0 } }`.
+        let impl_method_entity = SyntaxEntity::new(SyntaxKind::Method, "src/lib.rs", "area");
+        let impl_method_symbol =
+            SymbolEntity::new(SymbolKind::Method, impl_method_entity.id.as_str(), "area");
+
+        let (_symbols, override_edges) = resolve_overrides(
+            "area",
+            &impl_method_symbol,
+            "Shape",
+            &entities,
+            &edges,
+            &symbol_table,
+        );
+
+        let trait_entity = find(&entities, SyntaxKind::Interface, "Shape");
+        let trait_method_entity = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Method && e.name == "area")
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            trait_entity.id.clone(),
+            trait_method_entity.id.clone(),
+            EdgeKind::Declares
+        )));
+        let trait_method_symbol = symbol_table
+            .find_by_syntax_id(&trait_method_entity.id)
+            .unwrap();
+
+        assert!(override_edges.contains(&Edge::new(
+            impl_method_symbol.id.clone(),
+            trait_method_symbol.id.clone(),
+            EdgeKind::Overrides
+        )));
+    }
+
+    #[test]
+    fn a_method_with_no_trait_counterpart_produces_no_overrides_edge() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "trait Shape { fn area(&self) -> f64; } struct Circle;";
+        let (entities, edges) = extract(source);
+        let symbol_table = build_symbol_table(&entities);
+
+        let impl_method_entity = SyntaxEntity::new(SyntaxKind::Method, "src/lib.rs", "perimeter");
+        let impl_method_symbol = SymbolEntity::new(
+            SymbolKind::Method,
+            impl_method_entity.id.as_str(),
+            "perimeter",
+        );
+
+        let (_symbols, override_edges) = resolve_overrides(
+            "perimeter",
+            &impl_method_symbol,
+            "Shape",
+            &entities,
+            &edges,
+            &symbol_table,
+        );
+
+        assert!(override_edges.is_empty());
+    }
+
+    #[test]
+    fn overriding_a_method_of_an_external_trait_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let (entities, edges) = extract("struct Circle;");
+        let symbol_table = build_symbol_table(&entities);
+
+        let impl_method_entity = SyntaxEntity::new(SyntaxKind::Method, "src/lib.rs", "fmt");
+        let impl_method_symbol =
+            SymbolEntity::new(SymbolKind::Method, impl_method_entity.id.as_str(), "fmt");
+
+        let (symbols, override_edges) = resolve_overrides(
+            "fmt",
+            &impl_method_symbol,
+            "Debug",
+            &entities,
+            &edges,
+            &symbol_table,
+        );
+
+        let placeholder = symbols
+            .iter()
+            .find(|s| s.name.starts_with("external-trait-method:"))
+            .unwrap();
+        assert!(override_edges.contains(&Edge::new(
+            impl_method_symbol.id.clone(),
+            placeholder.id.clone(),
+            EdgeKind::Overrides
+        )));
+    }
+
+    #[test]
+    fn resolves_a_local_import_to_its_declared_symbol() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "struct Bar; fn run() {}";
+        let (entities, _edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let bar = find(&entities, SyntaxKind::Struct, "Bar");
+        let symbol_table = build_symbol_table(&entities);
+        let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
+        let bar_symbol = symbol_table.find_by_syntax_id(&bar.id).unwrap().clone();
+
+        let ast: syn::File = syn::parse_str("use crate::Bar;").unwrap();
+        let (_symbols, edges) = resolve_imports(&ast, &module_symbol, &entities, &symbol_table);
+
+        assert!(edges.contains(&Edge::new(
+            module_symbol.id,
+            bar_symbol.id,
+            EdgeKind::Imports
+        )));
+    }
+
+    #[test]
+    fn an_external_crate_import_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let (entities, _edges) = extract("fn run() {}");
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let symbol_table = build_symbol_table(&entities);
+        let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
+
+        let ast: syn::File = syn::parse_str("use serde::Serialize;").unwrap();
+        let (symbols, edges) = resolve_imports(&ast, &module_symbol, &entities, &symbol_table);
+
+        let placeholder = symbols
+            .iter()
+            .find(|s| s.name.starts_with("external-crate:"))
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            module_symbol.id,
+            placeholder.id.clone(),
+            EdgeKind::Imports
+        )));
+    }
+
+    #[test]
+    fn an_unresolved_local_import_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let (entities, _edges) = extract("fn run() {}");
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let symbol_table = build_symbol_table(&entities);
+        let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
+
+        let ast: syn::File = syn::parse_str("use crate::missing::Thing;").unwrap();
+        let (symbols, edges) = resolve_imports(&ast, &module_symbol, &entities, &symbol_table);
+
+        let placeholder = symbols
+            .iter()
+            .find(|s| s.name.starts_with("unresolved-local-import:"))
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            module_symbol.id,
+            placeholder.id.clone(),
+            EdgeKind::Imports
+        )));
+    }
+
+    #[test]
+    fn a_glob_import_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let (entities, _edges) = extract("fn run() {}");
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let symbol_table = build_symbol_table(&entities);
+        let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
+
+        let ast: syn::File = syn::parse_str("use crate::shapes::*;").unwrap();
+        let (symbols, edges) = resolve_imports(&ast, &module_symbol, &entities, &symbol_table);
+
+        let placeholder = symbols
+            .iter()
+            .find(|s| s.name.starts_with("glob-import:"))
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            module_symbol.id,
+            placeholder.id.clone(),
+            EdgeKind::Imports
+        )));
+    }
+
+    #[test]
+    fn exports_a_public_top_level_item() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "pub struct Bar; fn run() {}";
+        let (entities, _edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let bar = find(&entities, SyntaxKind::Struct, "Bar");
+        let symbol_table = build_symbol_table(&entities);
+        let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
+        let bar_symbol = symbol_table.find_by_syntax_id(&bar.id).unwrap().clone();
+
+        let ast: syn::File = syn::parse_str(source).unwrap();
+        let edges = resolve_exports(&ast, &module_symbol, &entities, &symbol_table);
+
+        assert!(edges.contains(&Edge::new(
+            module_symbol.id,
+            bar_symbol.id,
+            EdgeKind::Exports
+        )));
+    }
+
+    #[test]
+    fn a_private_top_level_item_is_not_exported() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "struct Bar; fn run() {}";
+        let (entities, _edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let symbol_table = build_symbol_table(&entities);
+        let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
+
+        let ast: syn::File = syn::parse_str(source).unwrap();
+        let edges = resolve_exports(&ast, &module_symbol, &entities, &symbol_table);
+
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn a_trait_declares_its_own_fn_items_as_method_entities() {
+        let (entities, edges) = extract("trait Shape { fn area(&self) -> f64; }");
+
+        let shape = find(&entities, SyntaxKind::Interface, "Shape");
+        let area = find(&entities, SyntaxKind::Method, "area");
+
+        assert!(edges.contains(&Edge::new(
+            shape.id.clone(),
+            area.id.clone(),
+            EdgeKind::Declares
+        )));
+    }
+
+    #[test]
+    fn cross_file_implements_resolves_against_a_trait_declared_in_another_file() {
+        use crate::symbols::build_symbol_table;
+
+        let (trait_entities, _trait_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter
+                .parse("trait Shape { fn area(&self) -> f64; }")
+                .unwrap();
+            adapter.extract(&ast, "src/shape.rs")
+        };
+        let (circle_entities, _circle_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter.parse("struct Circle;").unwrap();
+            adapter.extract(&ast, "src/circle.rs")
+        };
+
+        // A merged, repository-wide view -- exactly what a later
+        // repository-level pipeline stage assembles from each file's
+        // per-file `extract` output before running resolvers.
+        let mut entities = trait_entities.clone();
+        entities.extend(circle_entities.clone());
+        let symbol_table = build_symbol_table(&entities);
+
+        let shape = find(&entities, SyntaxKind::Interface, "Shape");
+        let circle = find(&entities, SyntaxKind::Struct, "Circle");
+        let shape_symbol = symbol_table.find_by_syntax_id(&shape.id).unwrap().clone();
+        let circle_symbol = symbol_table.find_by_syntax_id(&circle.id).unwrap().clone();
+
+        let item_impl = parse_item_impl("impl Shape for Circle { fn area(&self) -> f64 { 0.0 } }");
+        let (_symbols, edges) = resolve_implements(&item_impl, &entities, &symbol_table);
+
+        assert!(edges.contains(&Edge::new(
+            circle_symbol.id,
+            shape_symbol.id,
+            EdgeKind::Implements
+        )));
+    }
+
+    #[test]
+    fn cross_file_import_resolves_against_an_item_declared_in_another_file() {
+        use crate::symbols::build_symbol_table;
+
+        let (circle_entities, _circle_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter.parse("pub struct Circle;").unwrap();
+            adapter.extract(&ast, "src/circle.rs")
+        };
+        let (main_entities, _main_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter.parse("fn run() {}").unwrap();
+            adapter.extract(&ast, "src/main.rs")
+        };
+
+        let mut entities = circle_entities.clone();
+        entities.extend(main_entities.clone());
+        let symbol_table = build_symbol_table(&entities);
+
+        let main_module = find(&main_entities, SyntaxKind::Module, "src/main.rs");
+        let circle = find(&circle_entities, SyntaxKind::Struct, "Circle");
+        let main_module_symbol = symbol_table
+            .find_by_syntax_id(&main_module.id)
+            .unwrap()
+            .clone();
+        let circle_symbol = symbol_table.find_by_syntax_id(&circle.id).unwrap().clone();
+
+        let ast: syn::File = syn::parse_str("use crate::circle::Circle;").unwrap();
+        let (_symbols, edges) =
+            resolve_imports(&ast, &main_module_symbol, &entities, &symbol_table);
+
+        assert!(edges.contains(&Edge::new(
+            main_module_symbol.id,
+            circle_symbol.id,
+            EdgeKind::Imports
+        )));
+    }
+
+    #[test]
+    fn cross_file_depends_on_collapses_from_a_real_cross_file_call() {
+        use crate::resolve::resolve_depends_on;
+        use crate::symbols::build_symbol_table;
+        use std::collections::HashMap;
+
+        let (helper_entities, _helper_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter.parse("pub fn helper() {}").unwrap();
+            adapter.extract(&ast, "src/helper.rs")
+        };
+        let (main_entities, main_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter.parse("fn run() { helper() }").unwrap();
+            adapter.extract(&ast, "src/main.rs")
+        };
+
+        let mut entities = helper_entities.clone();
+        entities.extend(main_entities.clone());
+        let symbol_table = build_symbol_table(&entities);
+
+        let main_module = find(&main_entities, SyntaxKind::Module, "src/main.rs");
+        let helper_module = find(&helper_entities, SyntaxKind::Module, "src/helper.rs");
+        let run_syntax = find(&main_entities, SyntaxKind::Function, "run");
+        let helper_syntax = find(&helper_entities, SyntaxKind::Function, "helper");
+
+        let scope_tree = ScopeTree::build(main_module, &main_entities, &main_edges);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table
+            .find_by_syntax_id(&run_syntax.id)
+            .unwrap()
+            .clone();
+        let helper_symbol = symbol_table
+            .find_by_syntax_id(&helper_syntax.id)
+            .unwrap()
+            .clone();
+        let main_module_symbol = symbol_table
+            .find_by_syntax_id(&main_module.id)
+            .unwrap()
+            .clone();
+        let helper_module_symbol = symbol_table
+            .find_by_syntax_id(&helper_module.id)
+            .unwrap()
+            .clone();
+
+        // The cross-file call fails to resolve via `run`'s own (single-file)
+        // scope tree, matching `resolve_calls`'s existing scope-only lookup --
+        // so we exercise `DEPENDS_ON` directly against the known-resolved
+        // cross-file CALLS edge, exactly as a real repository-level pass
+        // (Phase 9) would once it merges scope trees across files.
+        let call_edge = Edge::new(
+            run_symbol.id.clone(),
+            helper_symbol.id.clone(),
+            EdgeKind::Calls,
+        );
+        let _ = (scope_tree, run_scope); // scope-tree lookup is single-file only; see note above.
+
+        let owner_file: HashMap<_, _> = [
+            (run_symbol.id.clone(), "src/main.rs".to_string()),
+            (helper_symbol.id.clone(), "src/helper.rs".to_string()),
+        ]
+        .into();
+        let module_symbol_for_file: HashMap<_, _> = [
+            ("src/main.rs".to_string(), main_module_symbol.id.clone()),
+            ("src/helper.rs".to_string(), helper_module_symbol.id.clone()),
+        ]
+        .into();
+
+        let depends_on = resolve_depends_on(&[call_edge], &owner_file, &module_symbol_for_file);
+
+        assert!(depends_on.contains(&Edge::new(
+            main_module_symbol.id,
+            helper_module_symbol.id,
+            EdgeKind::DependsOn
+        )));
     }
 }

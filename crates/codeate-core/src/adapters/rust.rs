@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use crate::adapter::LanguageAdapter;
 use crate::error::{Error, Result};
 use crate::model::{Edge, EdgeKind, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
+use crate::resolve::unresolved_symbol;
+use crate::symbols::{ScopeTree, SymbolTable};
 use crate::types::{type_symbol_for, TypeRef};
 
 const PRIMITIVE_TYPES: &[&str] = &[
@@ -326,6 +328,122 @@ fn extract_generic_params(
     }
 
     (symbols, edges, names)
+}
+
+/// Walk `expr`'s common sub-expression forms, calling `on_path` for every
+/// `syn::Expr::Path` leaf encountered. Not an exhaustive `syn::Expr` walk --
+/// unhandled forms (closures, macros, ranges, ...) simply aren't descended
+/// into, which is a deliberate scope limit for this phase rather than a
+/// silent-drop of something we claimed to resolve.
+fn walk_expr(expr: &syn::Expr, on_path: &mut impl FnMut(&syn::ExprPath)) {
+    match expr {
+        syn::Expr::Path(path) => on_path(path),
+        syn::Expr::Binary(b) => {
+            walk_expr(&b.left, on_path);
+            walk_expr(&b.right, on_path);
+        }
+        syn::Expr::Unary(u) => walk_expr(&u.expr, on_path),
+        syn::Expr::Paren(p) => walk_expr(&p.expr, on_path),
+        syn::Expr::Group(g) => walk_expr(&g.expr, on_path),
+        syn::Expr::Call(c) => {
+            walk_expr(&c.func, on_path);
+            for arg in &c.args {
+                walk_expr(arg, on_path);
+            }
+        }
+        syn::Expr::MethodCall(m) => {
+            walk_expr(&m.receiver, on_path);
+            for arg in &m.args {
+                walk_expr(arg, on_path);
+            }
+        }
+        syn::Expr::Field(f) => walk_expr(&f.base, on_path),
+        syn::Expr::Reference(r) => walk_expr(&r.expr, on_path),
+        syn::Expr::Return(r) => {
+            if let Some(inner) = &r.expr {
+                walk_expr(inner, on_path);
+            }
+        }
+        syn::Expr::Assign(a) => {
+            walk_expr(&a.left, on_path);
+            walk_expr(&a.right, on_path);
+        }
+        syn::Expr::If(i) => {
+            walk_expr(&i.cond, on_path);
+            for stmt in &i.then_branch.stmts {
+                walk_stmt(stmt, on_path);
+            }
+            if let Some((_, else_expr)) = &i.else_branch {
+                walk_expr(else_expr, on_path);
+            }
+        }
+        syn::Expr::Block(b) => {
+            for stmt in &b.block.stmts {
+                walk_stmt(stmt, on_path);
+            }
+        }
+        syn::Expr::Struct(s) => {
+            for field in &s.fields {
+                walk_expr(&field.expr, on_path);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_stmt(stmt: &syn::Stmt, on_path: &mut impl FnMut(&syn::ExprPath)) {
+    match stmt {
+        syn::Stmt::Local(local) => {
+            if let Some(init) = &local.init {
+                walk_expr(&init.expr, on_path);
+            }
+        }
+        syn::Stmt::Expr(expr, _) => walk_expr(expr, on_path),
+        syn::Stmt::Item(_) | syn::Stmt::Macro(_) => {}
+    }
+}
+
+/// Resolve every single-segment identifier usage in `block` back to its
+/// declaring symbol via `scope_tree`, emitting a `REFERENCES` edge from
+/// `fn_symbol` to the resolved symbol -- or to an explicit
+/// `unresolved_symbol("unknown-local", ..)` placeholder when the name isn't
+/// found in scope. Multi-segment paths (`std::process::exit`) are left to
+/// call resolution (task 3).
+fn resolve_references(
+    block: &syn::Block,
+    fn_symbol: &SymbolEntity,
+    scope_tree: &ScopeTree,
+    scope: usize,
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    for stmt in &block.stmts {
+        walk_stmt(stmt, &mut |path: &syn::ExprPath| {
+            if path.path.segments.len() != 1 {
+                return;
+            }
+            let name = path.path.segments[0].ident.to_string();
+
+            let resolved_symbol = scope_tree
+                .lookup(scope, &name)
+                .and_then(|syntax_id| symbol_table.find_by_syntax_id(syntax_id))
+                .cloned();
+
+            let target = match resolved_symbol {
+                Some(symbol) => symbol,
+                None => {
+                    let placeholder = unresolved_symbol("unknown-local", &name);
+                    symbols.push(placeholder.clone());
+                    placeholder
+                }
+            };
+            edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::References));
+        });
+    }
+
+    (symbols, edges)
 }
 
 #[cfg(test)]
@@ -655,6 +773,68 @@ mod tests {
 
         let unit_type = type_symbol_for(&TypeRef::Primitive("()".to_string()));
         assert!(edges.contains(&Edge::new(fn_symbol.id.clone(), unit_type.id.clone(), EdgeKind::Returns)));
+    }
+
+    fn parse_fn_block(source: &str) -> syn::Block {
+        let file: syn::File = syn::parse_str(source).expect("valid Rust source");
+        let syn::Item::Fn(item_fn) = &file.items[0] else {
+            panic!("source's first item is not a fn");
+        };
+        *item_fn.block.clone()
+    }
+
+    #[test]
+    fn resolves_a_reference_to_an_in_scope_variable() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "fn run() { let count = 0; count }";
+        let (entities, edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+        let count_syntax = find(&entities, SyntaxKind::Variable, "count");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let count_symbol = symbol_table.find_by_syntax_id(&count_syntax.id).unwrap().clone();
+
+        let block = parse_fn_block(source);
+        let (_symbols, ref_edges) =
+            resolve_references(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        assert!(ref_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            count_symbol.id.clone(),
+            EdgeKind::References
+        )));
+    }
+
+    #[test]
+    fn a_reference_to_an_undefined_name_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "fn run() { missing_name }";
+        let (entities, edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+
+        let block = parse_fn_block(source);
+        let (symbols, ref_edges) =
+            resolve_references(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        let placeholder = symbols.first().expect("an unresolved placeholder was created");
+        assert_eq!(placeholder.name, "unknown-local:missing_name");
+        assert!(ref_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            placeholder.id.clone(),
+            EdgeKind::References
+        )));
     }
 
     #[test]

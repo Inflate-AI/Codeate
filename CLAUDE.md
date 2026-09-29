@@ -65,9 +65,13 @@ three files so it survives and stays visible to the user.
 6. **Wait for review confirmation.** Do not close the phase until the user confirms the
    Happenings review.
 7. **Close the phase with structured commits.** On confirmation:
-   - Commit the work in logical, structured commits (not one giant commit) — e.g. one
-     commit per task or per coherent unit, with clear messages.
-   - Append the closed phase's summary to `CHANGELOG.md`.
+   - Turn the reviewed Happenings into a structured `CHANGELOG.md` entry *before*
+     committing: a `## [Phase N] — <name>` section (Keep a Changelog style — `Added`
+     / `Changed`/ `Fixed` groups as applicable), one bullet per task, written from the
+     Happenings content rather than re-derived from the diff.
+   - Commit the work in logical, structured commits (not one giant commit) — one
+     commit per task or per coherent unit, with clear messages. The `CHANGELOG.md`
+     update and `ROADMAP.md`/`TASKS.md` bookkeeping land in their own closing commit.
    - Mark the phase complete in `ROADMAP.md` and clear/archive its section in `TASKS.md`.
 
 Never skip a step in this sequence, and never start the next phase's implementation

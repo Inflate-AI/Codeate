@@ -165,7 +165,7 @@ Graph**.
 ---
 
 ## Phase 10 — Persistent State Store
-**Status:** in progress
+**Status:** done
 
 *Architecture stage: State Store.*
 
@@ -181,7 +181,7 @@ Persist the Code Graph so analysis doesn't restart from zero on every invocation
 ---
 
 ## Phase 11 — Query Engine
-**Status:** planned
+**Status:** in progress
 
 *Architecture stage: Query Engine.*
 

@@ -7,6 +7,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 10] — Persistent State Store
+
+### Added
+
+- Serde derives on the canonical model (`EntityId`, `SyntaxKind`/`SyntaxEntity`,
+  `SymbolKind`/`SymbolEntity`, `EdgeKind`/`Edge`): purely additive, no behavior change to
+  any existing method.
+- `StoredGraph` (`store.rs`): the full graph (syntax entities, symbols, edges) plus an
+  explicit schema `version`, serialized as pretty-printed JSON via `serde_json` -- this
+  doubles as the "export to JSON" operation, with no separate format to maintain.
+- `save()`/`load()`: round-trip a `StoredGraph` to/from a file exactly. `load()` rejects
+  a file whose `version` is newer than this build's `CURRENT_VERSION` with a clear error
+  rather than silently misreading it; migrating an older-but-still-supported version
+  forward is deferred to whenever a version bump actually happens.
+- `compare()`: loads two saved states and diffs the graphs they build into, via Phase
+  9's `graph::diff`.
+- `export_graphml()`: GraphML output for external tools (Gephi, yEd, ...), with proper
+  XML escaping for names containing special characters -- a presentation format, not
+  meant to round-trip back into Codeate (that's `StoredGraph`'s job).
+- New dependency: `serde_json`.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (177 tests total: 160 `codeate-core` unit, 3 symbols
+  end-to-end, 1 golden-file, 4 model invariant, 1 detect, 5 ingest, 3 CLI) via
+  `scripts/check.ps1`.
+
 ## [Phase 9] — Graph Builder
 
 ### Added

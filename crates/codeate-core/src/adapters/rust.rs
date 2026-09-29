@@ -591,6 +591,140 @@ fn resolve_calls(
     (symbols, edges)
 }
 
+enum InstantiateSite<'a> {
+    StructLiteral(&'a syn::ExprStruct),
+    Call(&'a syn::ExprCall),
+}
+
+/// Like `walk_calls`, but surfaces struct-literal expressions (`Point { .. }`)
+/// alongside call expressions (candidate tuple-struct constructors).
+fn walk_instantiate_sites<'a>(expr: &'a syn::Expr, on_site: &mut impl FnMut(InstantiateSite<'a>)) {
+    match expr {
+        syn::Expr::Struct(s) => {
+            on_site(InstantiateSite::StructLiteral(s));
+            for field in &s.fields {
+                walk_instantiate_sites(&field.expr, on_site);
+            }
+        }
+        syn::Expr::Call(c) => {
+            on_site(InstantiateSite::Call(c));
+            for arg in &c.args {
+                walk_instantiate_sites(arg, on_site);
+            }
+        }
+        syn::Expr::MethodCall(m) => {
+            walk_instantiate_sites(&m.receiver, on_site);
+            for arg in &m.args {
+                walk_instantiate_sites(arg, on_site);
+            }
+        }
+        syn::Expr::Binary(b) => {
+            walk_instantiate_sites(&b.left, on_site);
+            walk_instantiate_sites(&b.right, on_site);
+        }
+        syn::Expr::Unary(u) => walk_instantiate_sites(&u.expr, on_site),
+        syn::Expr::Paren(p) => walk_instantiate_sites(&p.expr, on_site),
+        syn::Expr::Group(g) => walk_instantiate_sites(&g.expr, on_site),
+        syn::Expr::Field(f) => walk_instantiate_sites(&f.base, on_site),
+        syn::Expr::Reference(r) => walk_instantiate_sites(&r.expr, on_site),
+        syn::Expr::Return(r) => {
+            if let Some(inner) = &r.expr {
+                walk_instantiate_sites(inner, on_site);
+            }
+        }
+        syn::Expr::Assign(a) => {
+            walk_instantiate_sites(&a.left, on_site);
+            walk_instantiate_sites(&a.right, on_site);
+        }
+        syn::Expr::If(i) => {
+            walk_instantiate_sites(&i.cond, on_site);
+            for stmt in &i.then_branch.stmts {
+                walk_instantiate_stmt(stmt, on_site);
+            }
+            if let Some((_, else_expr)) = &i.else_branch {
+                walk_instantiate_sites(else_expr, on_site);
+            }
+        }
+        syn::Expr::Block(b) => {
+            for stmt in &b.block.stmts {
+                walk_instantiate_stmt(stmt, on_site);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_instantiate_stmt<'a>(stmt: &'a syn::Stmt, on_site: &mut impl FnMut(InstantiateSite<'a>)) {
+    match stmt {
+        syn::Stmt::Local(local) => {
+            if let Some(init) = &local.init {
+                walk_instantiate_sites(&init.expr, on_site);
+            }
+        }
+        syn::Stmt::Expr(expr, _) => walk_instantiate_sites(expr, on_site),
+        syn::Stmt::Item(_) | syn::Stmt::Macro(_) => {}
+    }
+}
+
+/// Resolve object-creation sites in `block` to `INSTANTIATES` edges from
+/// `fn_symbol`. Struct literals (`Point { .. }`) always produce an edge --
+/// to the real scope-resolved struct's `Type` symbol when in scope, else a
+/// `Named`-type symbol (Phase 6's `type_symbol_for`) standing in for an
+/// external/unresolved struct. Calls (`Meters(1.0)`) are only treated as a
+/// tuple-struct constructor when the callee resolves in scope to a `Type`
+/// symbol -- an unrecognized call is left to `resolve_calls` rather than
+/// guessed at here.
+fn resolve_instantiates(
+    block: &syn::Block,
+    fn_symbol: &SymbolEntity,
+    scope_tree: &ScopeTree,
+    scope: usize,
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    for stmt in &block.stmts {
+        walk_instantiate_stmt(stmt, &mut |site| match site {
+            InstantiateSite::StructLiteral(struct_expr) => {
+                let Some(name) = struct_expr.path.segments.last().map(|seg| seg.ident.to_string()) else {
+                    return;
+                };
+                let resolved = scope_tree
+                    .lookup(scope, &name)
+                    .and_then(|syntax_id| symbol_table.find_by_syntax_id(syntax_id))
+                    .cloned();
+                let target = resolved.unwrap_or_else(|| {
+                    let type_symbol =
+                        type_symbol_for(&TypeRef::Named { name: name.clone(), type_args: vec![] });
+                    symbols.push(type_symbol.clone());
+                    type_symbol
+                });
+                edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::Instantiates));
+            }
+            InstantiateSite::Call(call_expr) => {
+                let syn::Expr::Path(path) = call_expr.func.as_ref() else {
+                    return;
+                };
+                let Some(name) = path.path.segments.last().map(|seg| seg.ident.to_string()) else {
+                    return;
+                };
+                let Some(symbol) = scope_tree
+                    .lookup(scope, &name)
+                    .and_then(|syntax_id| symbol_table.find_by_syntax_id(syntax_id))
+                else {
+                    return;
+                };
+                if symbol.kind == SymbolKind::Type {
+                    edges.push(Edge::new(fn_symbol.id.clone(), symbol.id.clone(), EdgeKind::Instantiates));
+                }
+            }
+        });
+    }
+
+    (symbols, edges)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1060,6 +1194,60 @@ mod tests {
             run_symbol.id.clone(),
             placeholder.id.clone(),
             EdgeKind::Calls
+        )));
+    }
+
+    #[test]
+    fn resolves_a_struct_literal_instantiation() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "struct Point { x: i32, y: i32 } fn run() {}";
+        let (entities, edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+        let point_syntax = find(&entities, SyntaxKind::Struct, "Point");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let point_symbol = symbol_table.find_by_syntax_id(&point_syntax.id).unwrap().clone();
+
+        let block = parse_fn_block("fn run() { Point { x: 1, y: 2 } }");
+        let (_symbols, inst_edges) =
+            resolve_instantiates(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        assert!(inst_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            point_symbol.id.clone(),
+            EdgeKind::Instantiates
+        )));
+    }
+
+    #[test]
+    fn resolves_a_tuple_struct_constructor_call() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "struct Meters(f64); fn run() {}";
+        let (entities, edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+        let meters_syntax = find(&entities, SyntaxKind::Struct, "Meters");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let meters_symbol = symbol_table.find_by_syntax_id(&meters_syntax.id).unwrap().clone();
+
+        let block = parse_fn_block("fn run() { Meters(1.0) }");
+        let (_symbols, inst_edges) =
+            resolve_instantiates(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        assert!(inst_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            meters_symbol.id.clone(),
+            EdgeKind::Instantiates
         )));
     }
 

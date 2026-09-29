@@ -278,7 +278,12 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
             print_symbol_list(&engine.references_to(&id), "no references", json);
             Ok(())
         }
-        QueryKind::Impact { id } => Err(format!("query impact --id {id}: not yet implemented")),
+        QueryKind::Impact { id } => {
+            let id = parse_id(&id)?;
+            require_symbol(&engine, &id)?;
+            print_id_list(&graph, &engine.impact_of(&id), "no impact", json);
+            Ok(())
+        }
         QueryKind::EntryPoints => Err("query entry-points: not yet implemented".to_string()),
         QueryKind::ModuleTree => Err("query module-tree: not yet implemented".to_string()),
     }

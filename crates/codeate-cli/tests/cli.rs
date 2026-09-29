@@ -390,6 +390,49 @@ fn query_references_finds_a_referencing_function() {
 }
 
 #[test]
+fn query_impact_reports_every_transitive_caller() {
+    let repo = TempRepo::new(&[(
+        "src/lib.rs",
+        "pub fn c() {}\npub fn b() { c(); }\npub fn a() { b(); }",
+    )]);
+    let store = analyze(&repo);
+    let c_id = symbol_id(&store, "c");
+
+    let output = codeate()
+        .args(["query", "impact", "--id", &c_id, "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query impact");
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let names: Vec<&str> = value
+        .as_array()
+        .expect("json array")
+        .iter()
+        .map(|v| v["name"].as_str().expect("name"))
+        .collect();
+    assert!(names.contains(&"b"));
+    assert!(names.contains(&"a"));
+}
+
+#[test]
+fn query_impact_rejects_an_unknown_id() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "impact", "--id", "not-a-real-id", "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query impact");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
 fn query_references_rejects_an_unknown_id() {
     let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
     let store = analyze(&repo);

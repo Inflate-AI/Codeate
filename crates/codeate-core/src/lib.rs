@@ -3,6 +3,7 @@ pub mod adapters;
 pub mod config;
 pub mod detect;
 pub mod error;
+pub mod graph;
 pub mod hash;
 pub mod ingest;
 pub mod language;
@@ -20,6 +21,7 @@ pub use detect::{
     default_registry, detect, detect_by_content, detect_by_extension, detect_languages,
 };
 pub use error::{Error, Result};
+pub use graph::{diff, Graph, GraphDiff, IntegrityReport, Node};
 pub use hash::hash_bytes;
 pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};

@@ -149,7 +149,7 @@ between types and modules.
 ---
 
 ## Phase 9 — Graph Builder
-**Status:** in progress
+**Status:** done
 
 *Architecture stage: Graph Builder.*
 
@@ -165,7 +165,7 @@ Graph**.
 ---
 
 ## Phase 10 — Persistent State Store
-**Status:** planned
+**Status:** in progress
 
 *Architecture stage: State Store.*
 

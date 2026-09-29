@@ -7,6 +7,57 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 9] — Graph Builder
+
+### Added
+
+- Repository resolution pipeline (`pipeline::analyze_repository`, new): the missing
+  piece discovered while closing Phase 8 -- given a `Repository`, parses every Rust
+  file, extracts with `ResolutionSites` (a new side-channel `extract_items` populates
+  during its existing walk, carrying the raw `syn` references -- function bodies, impl
+  blocks, trait-impl methods, traits -- that Phase 6-8's resolvers need but don't fit
+  the plain `(Vec<SyntaxEntity>, Vec<Edge>)` `extract()` returns), merges symbol tables
+  repository-wide, then runs reference/call/instantiate resolution per body and
+  structural resolution (`EXTENDS`/`IMPLEMENTS`/`OVERRIDES`/`IMPORTS`/`EXPORTS`/
+  `DEPENDS_ON`) against the full repository's entities and merged symbol table -- built
+  TDD, 3 tests including a real two-file cross-file case through actual disk files.
+- `Graph` (`graph.rs`): unifies syntax and symbol entities behind one `Node` type,
+  indexed by `EntityId` for O(1) lookup, with outgoing/incoming adjacency lists
+  (optionally filtered by `EdgeKind`). `Graph::build()` is the single construction entry
+  point, taking an `AnalysisResult`'s fields -- built TDD, 2 unit tests.
+- Structural integrity checks: `Graph::build` returns an `IntegrityReport` alongside the
+  graph -- dangling edges (endpoint not in the node set), orphaned nodes (no edges at
+  all; not necessarily invalid, since an unresolved placeholder is expected to be one),
+  and invalid cycles (a self-referential `EXTENDS`/`IMPLEMENTS`/`OVERRIDES` edge, as
+  opposed to a self-referencing `CALLS` edge from plain recursion, which is fine).
+  Nothing is dropped or panicked on -- a dangling edge is still indexed and also
+  reported -- built TDD, 4 unit tests.
+- Deterministic diffing: `Graph::canonical_form()` sorts nodes and edges into a fixed
+  textual form so `HashMap`-driven construction order never affects the result;
+  `Graph::fingerprint()` hashes that form via the Phase 1 `hash_bytes` primitive.
+  `graph::diff(a, b)` reports added/removed nodes and edges between two graphs by
+  value -- built TDD, 5 unit tests (including same-input-twice producing an identical
+  fingerprint and an empty diff).
+
+### Fixed
+
+- Every resolver function added since Phase 5 (type/field/signature/generic
+  extraction, reference/call/instantiate resolution, Phase 8's structural resolvers)
+  is now genuinely reachable from `analyze_repository`, removing the `#[allow(dead_code)]`
+  annotations added while closing Phase 8 -- except `extract_struct_fields`/
+  `extract_signature_types`/`extract_generic_params` (Phase 6's struct-field and
+  signature-type extraction), which remain a narrower, explicitly-noted open gap: they
+  still aren't called from `extract_items`, so struct fields' and function signatures'
+  own type symbols don't yet appear in the pipeline's output. Left for a future task
+  rather than force-wired under time pressure.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (169 tests total: 152 `codeate-core` unit, 3
+  symbols end-to-end, 1 golden-file, 4 model invariant, 1 detect, 5 ingest, 3 CLI) via
+  `scripts/check.ps1`.
+
 ## [Phase 8] — Structural Relationships
 
 ### Added

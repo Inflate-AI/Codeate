@@ -7,6 +7,76 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 8] — Structural Relationships
+
+### Added
+
+- `EXTENDS`/`IMPLEMENTS` resolution (`resolve_implements`, `resolve_supertraits` in
+  `adapters/rust.rs`): `impl Trait for Type` blocks resolve to an `IMPLEMENTS` edge from
+  the implementing `Struct`/`Enum` symbol to the trait's `Interface` symbol; `trait Sub:
+  Super` supertrait bounds resolve to `EXTENDS` between `Interface` symbols. An inherent
+  impl (no `for Trait`) produces nothing. Either side falls back to an explicit
+  `unresolved_symbol` placeholder (`external-type`/`external-trait`) when it isn't
+  declared in this repository -- built TDD, 4 unit tests.
+- Trait method declarations: the Rust adapter now declares a trait's own `fn` items as
+  `Method` entities under the trait (previously only impl methods got a `Method`
+  entity), giving `OVERRIDES` resolution a real trait-side symbol to point at. Updated
+  the Phase 4 golden fixture's expected `Method` count (1 -> 2: `magnitude` + `area`)
+  accordingly.
+- `OVERRIDES` resolution (`resolve_overrides`): an impl method resolves to an `OVERRIDES`
+  edge at the trait's matching method by walking that specific trait entity's own
+  `DECLARES` edges (not a repo-wide name scan, so same-named methods on unrelated traits
+  never cross-match). No trait counterpart produces no edge; an external trait produces
+  an explicit `external-trait-method` placeholder -- built TDD, 3 unit tests.
+- `IMPORTS`/`EXPORTS` resolution (`resolve_imports`, `resolve_exports`): `use` trees
+  (paths, groups, renames, globs) resolve `crate`/`self`/`super`-rooted targets against
+  the repository's declared items into `IMPORTS` edges from the file's module symbol;
+  anything else (external crates, `std` included) gets an explicit `external-crate`
+  placeholder, and an unresolvable local path gets its own `unresolved-local-import`
+  placeholder. `pub` top-level items get `EXPORTS` edges from the file's module symbol
+  -- built TDD, 5 unit tests.
+- `DEPENDS_ON` resolution (new language-agnostic `resolve/structural.rs`):
+  `resolve_depends_on()` collapses `IMPORTS`/`CALLS`/`REFERENCES`/`INSTANTIATES` edges
+  into deduplicated file-to-file `DEPENDS_ON` edges via an explicit owner-file map;
+  same-file edges and edges to unmapped (unresolved) targets contribute nothing -- built
+  TDD, 5 unit tests.
+- Cross-file resolution: all of the above take a repository-wide entity list and merged
+  symbol table rather than a single file's scope, so they resolve across files without
+  further wiring -- confirmed with 3 dedicated cross-file tests (`IMPLEMENTS` against a
+  trait declared in another file, `IMPORTS` against an item declared in another file, and
+  an end-to-end `DEPENDS_ON` test built on real two-file adapter output).
+- Explicit-unresolved audit: every new edge kind (`EXTENDS`, `IMPLEMENTS`, `OVERRIDES`,
+  `IMPORTS`, `EXPORTS`) has a dedicated test for its "target not in this repository"
+  case; `EXPORTS` has no unresolved case by construction (an exported item is always
+  declared in the exporting file) and `RETURNS`/`ACCEPTS` were already covered in Phase
+  6.
+
+### Fixed
+
+- `scripts/check.ps1` never actually enforced its own steps: `$ErrorActionPreference =
+  "Stop"` only catches PowerShell/cmdlet errors, not a native command (`cargo`)
+  returning a nonzero exit code, so a failing `cargo clippy -- -D warnings` (or even
+  `cargo test`) fell straight through to a printed "All checks passed." Discovered while
+  re-verifying Phase 8 after an unrelated local toolchain reinstall. Fixed with an
+  explicit `$LASTEXITCODE` check after every step.
+- With that fixed, `clippy -D warnings` failed for real: every resolver function added
+  since Phase 5 (type/field/signature/generic extraction, reference/call/instantiate
+  resolution, and this phase's own structural resolvers) is a private helper never
+  called outside its own unit tests -- none of it is wired into `LanguageAdapter`'s
+  `resolve_symbols`/`resolve_references`, or into any repository-level pass, because
+  that pass doesn't exist yet. Annotated each with `#[allow(dead_code)]` and a comment
+  naming Phase 9's repository pipeline as the intended integration point, rather than
+  force-wiring per-file-only trait methods to functions that need repository-wide
+  context (this phase's own cross-file resolvers) or silently deleting tested,
+  correct code. Phase 9 removes these allows as it wires the real pipeline together.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass, for real this time (155 tests total: 138
+  `codeate-core` unit, 3 symbols end-to-end, 1 golden-file, 4 model invariant, 1 detect,
+  5 ingest, 3 CLI) via the fixed `scripts/check.ps1`.
+
 ## [Phase 7] — Reference & Call Resolution
 
 ### Added

@@ -134,7 +134,7 @@ Resolve usages back to the symbols they refer to.
 ---
 
 ## Phase 8 — Structural Relationships
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Semantic Analysis (dependencies, structure).*
 
@@ -149,7 +149,7 @@ between types and modules.
 ---
 
 ## Phase 9 — Graph Builder
-**Status:** planned
+**Status:** in progress
 
 *Architecture stage: Graph Builder.*
 

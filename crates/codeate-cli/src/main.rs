@@ -143,13 +143,12 @@ fn print_json(value: &serde_json::Value) {
     println!("{}", serde_json::to_string_pretty(value).expect("value is serializable"));
 }
 
-fn cmd_symbol(engine: &codeate_core::QueryEngine, name: &str, json: bool) {
-    let matches = engine.symbols_named(name);
+fn print_symbol_list(matches: &[&codeate_core::SymbolEntity], empty_message: &str, json: bool) {
     if json {
         let value: Vec<serde_json::Value> = matches.iter().copied().map(symbol_json).collect();
         print_json(&serde_json::Value::Array(value));
     } else if matches.is_empty() {
-        println!("no symbols named '{name}'");
+        println!("{empty_message}");
     } else {
         for symbol in matches {
             println!("{}  {}  {}", symbol.id.as_str(), symbol.kind.as_str(), symbol.name);
@@ -157,14 +156,25 @@ fn cmd_symbol(engine: &codeate_core::QueryEngine, name: &str, json: bool) {
     }
 }
 
+fn require_symbol(engine: &codeate_core::QueryEngine, id: &codeate_core::EntityId) -> Result<(), String> {
+    if engine.symbol_by_id(id).is_none() {
+        Err(format!("no symbol with id {}", id.as_str()))
+    } else {
+        Ok(())
+    }
+}
+
+fn cmd_symbol(engine: &codeate_core::QueryEngine, name: &str, json: bool) {
+    let matches = engine.symbols_named(name);
+    print_symbol_list(&matches, &format!("no symbols named '{name}'"), json);
+}
+
 fn cmd_definition(
     engine: &codeate_core::QueryEngine,
     id: &codeate_core::EntityId,
     json: bool,
 ) -> Result<(), String> {
-    if engine.symbol_by_id(id).is_none() {
-        return Err(format!("no symbol with id {}", id.as_str()));
-    }
+    require_symbol(engine, id)?;
     let definition = engine.definition_of(id);
     if json {
         let value = definition.map(syntax_json).unwrap_or(serde_json::Value::Null);
@@ -195,8 +205,18 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
             Ok(())
         }
         QueryKind::Definition { id } => cmd_definition(&engine, &parse_id(&id)?, json),
-        QueryKind::Callers { id } => Err(format!("query callers --id {id}: not yet implemented")),
-        QueryKind::Callees { id } => Err(format!("query callees --id {id}: not yet implemented")),
+        QueryKind::Callers { id } => {
+            let id = parse_id(&id)?;
+            require_symbol(&engine, &id)?;
+            print_symbol_list(&engine.callers_of(&id), "no callers", json);
+            Ok(())
+        }
+        QueryKind::Callees { id } => {
+            let id = parse_id(&id)?;
+            require_symbol(&engine, &id)?;
+            print_symbol_list(&engine.callees_of(&id), "no callees", json);
+            Ok(())
+        }
         QueryKind::Dependencies { id } => {
             Err(format!("query dependencies --id {id}: not yet implemented"))
         }

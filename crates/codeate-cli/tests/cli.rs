@@ -252,6 +252,52 @@ fn query_definition_follows_the_symbol_to_its_declaring_entity() {
 }
 
 #[test]
+fn query_callers_and_callees_reflect_a_call_edge() {
+    let repo = TempRepo::new(&[(
+        "src/lib.rs",
+        "pub fn helper() {}\npub fn run() { helper(); }",
+    )]);
+    let store = analyze(&repo);
+    let helper_id = symbol_id(&store, "helper");
+    let run_id = symbol_id(&store, "run");
+
+    let callers = codeate()
+        .args(["query", "callers", "--id", &helper_id, "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query callers");
+    assert!(callers.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&callers.stdout).expect("valid json");
+    assert_eq!(value[0]["name"], "run");
+
+    let callees = codeate()
+        .args(["query", "callees", "--id", &run_id, "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query callees");
+    assert!(callees.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&callees.stdout).expect("valid json");
+    assert_eq!(value[0]["name"], "helper");
+}
+
+#[test]
+fn query_callers_rejects_an_unknown_id() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "callers", "--id", "not-a-real-id", "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query callers");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
 fn query_definition_rejects_an_unknown_id() {
     let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
     let store = analyze(&repo);

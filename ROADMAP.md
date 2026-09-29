@@ -181,7 +181,7 @@ Persist the Code Graph so analysis doesn't restart from zero on every invocation
 ---
 
 ## Phase 11 — Query Engine
-**Status:** in progress
+**Status:** done
 
 *Architecture stage: Query Engine.*
 

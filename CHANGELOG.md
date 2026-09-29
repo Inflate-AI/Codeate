@@ -7,6 +7,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 11] — Query Engine
+
+### Added
+
+- `pipeline::analyze_repository` now also wires `DEFINED_IN` edges
+  (`symbols::defined_in_edges`) into its output -- a gap found while building the query
+  engine's definition lookup, which needs them.
+- `QueryEngine` (`query.rs`), operating purely over an already-built `Graph` -- no
+  re-parsing, re-resolving, or inference:
+  - `symbols_named`/`symbol_by_id`/`definition_of` -- symbol and definition lookup.
+  - `callers_of`/`callees_of`, built on `CALLS` -- call graph queries.
+  - `dependencies_of`/`dependents_of`, a transitive closure over `DEPENDS_ON`/`IMPORTS`.
+  - `implementers_of`, built on `IMPLEMENTS` -- implementation lookup.
+  - `references_to`, built on `REFERENCES` -- returns the enclosing function/method
+    symbol Phase 7 attributes a reference to, not a fine-grained expression site.
+  - `impact_of`, a transitive reverse walk over every edge kind representing "the
+    source needs the target" (`CALLS`/`REFERENCES`/`IMPLEMENTS`/`EXTENDS`/`OVERRIDES`/
+    `DEPENDS_ON`/`IMPORTS`) -- impact analysis.
+  - `entry_points` (functions/methods named `main`) and `module_tree` (the `CONTAINS`
+    hierarchy of `Module` entities, as a nested `ModuleTree`) -- repository exploration.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (186 tests total: 169 `codeate-core` unit, 3 symbols
+  end-to-end, 1 golden-file, 4 model invariant, 1 detect, 5 ingest, 3 CLI) via
+  `scripts/check.ps1`.
+
 ## [Phase 10] — Persistent State Store
 
 ### Added

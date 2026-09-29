@@ -8,6 +8,7 @@ pub mod ingest;
 pub mod language;
 pub mod model;
 pub mod repository;
+pub mod resolve;
 pub mod symbols;
 pub mod types;
 
@@ -21,6 +22,7 @@ pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};
 pub use model::{Edge, EdgeKind, EntityId, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
 pub use repository::{File, Repository};
+pub use resolve::unresolved_symbol;
 pub use symbols::{
     build_symbol_table, defined_in_edges, merge_symbol_tables, ScopeTree, SymbolTable,
     SymbolTableEntry,

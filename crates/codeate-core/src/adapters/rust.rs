@@ -95,6 +95,7 @@ fn extract_items(
                 let entity = SyntaxEntity::new(SyntaxKind::Function, scope, &name);
                 let fn_scope = child_scope(scope, &name);
                 extract_params(&item_fn.sig, &entity, &fn_scope, entities, edges);
+                extract_body(&item_fn.block, &entity, &fn_scope, entities, edges);
                 declare(parent, entity, entities, edges);
             }
             syn::Item::Impl(item_impl) => {
@@ -104,6 +105,7 @@ fn extract_items(
                         let entity = SyntaxEntity::new(SyntaxKind::Method, scope, &name);
                         let method_scope = child_scope(scope, &name);
                         extract_params(&method.sig, &entity, &method_scope, entities, edges);
+                        extract_body(&method.block, &entity, &method_scope, entities, edges);
                         declare(parent, entity, entities, edges);
                     }
                 }
@@ -127,6 +129,39 @@ fn extract_params(
                     SyntaxEntity::new(SyntaxKind::Parameter, scope, pat_ident.ident.to_string());
                 contain(parent, entity, entities, edges);
             }
+        }
+    }
+}
+
+/// Extract `let` bindings as `Variable` entities and top-level body
+/// statements/expressions as `Statement`/`Expression` entities, all
+/// contained by `parent` (the enclosing function/method). Nested items
+/// (e.g. a fn defined inside a fn body) are out of scope for this phase.
+fn extract_body(
+    block: &syn::Block,
+    parent: &SyntaxEntity,
+    scope: &str,
+    entities: &mut Vec<SyntaxEntity>,
+    edges: &mut Vec<Edge>,
+) {
+    for (index, stmt) in block.stmts.iter().enumerate() {
+        match stmt {
+            syn::Stmt::Local(local) => {
+                if let syn::Pat::Ident(pat_ident) = &local.pat {
+                    let entity =
+                        SyntaxEntity::new(SyntaxKind::Variable, scope, pat_ident.ident.to_string());
+                    contain(parent, entity, entities, edges);
+                }
+            }
+            syn::Stmt::Expr(_, Some(_semicolon)) => {
+                let entity = SyntaxEntity::new(SyntaxKind::Statement, scope, format!("stmt_{index}"));
+                contain(parent, entity, entities, edges);
+            }
+            syn::Stmt::Expr(_, None) => {
+                let entity = SyntaxEntity::new(SyntaxKind::Expression, scope, format!("expr_{index}"));
+                contain(parent, entity, entities, edges);
+            }
+            syn::Stmt::Item(_) | syn::Stmt::Macro(_) => {}
         }
     }
 }
@@ -226,6 +261,39 @@ mod tests {
         assert!(edges.contains(&Edge::new(file_module.id.clone(), shapes.id.clone(), EdgeKind::Contains)));
         assert!(edges.contains(&Edge::new(shapes.id.clone(), circle.id.clone(), EdgeKind::Contains)));
         assert!(!edges.contains(&Edge::new(file_module.id.clone(), circle.id.clone(), EdgeKind::Contains)));
+    }
+
+    #[test]
+    fn extracts_let_bindings_as_variables_contained_by_the_function() {
+        let (entities, edges) = extract("fn run() { let count = 0; let total = count + 1; }");
+
+        let function = find(&entities, SyntaxKind::Function, "run");
+        let count = find(&entities, SyntaxKind::Variable, "count");
+        let total = find(&entities, SyntaxKind::Variable, "total");
+
+        assert!(edges.contains(&Edge::new(function.id.clone(), count.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(function.id.clone(), total.id.clone(), EdgeKind::Contains)));
+    }
+
+    #[test]
+    fn extracts_a_trailing_statement_and_a_final_tail_expression() {
+        let (entities, edges) = extract("fn run() { let x = 1; x + 1; x }");
+
+        let function = find(&entities, SyntaxKind::Function, "run");
+        let statement = find(&entities, SyntaxKind::Statement, "stmt_1");
+        let tail_expr = find(&entities, SyntaxKind::Expression, "expr_2");
+
+        assert!(edges.contains(&Edge::new(function.id.clone(), statement.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(function.id.clone(), tail_expr.id.clone(), EdgeKind::Contains)));
+    }
+
+    #[test]
+    fn method_bodies_are_extracted_too() {
+        let source = "struct Counter; impl Counter { fn increment(&mut self) { let step = 1; } }";
+        let (entities, _edges) = extract(source);
+
+        find(&entities, SyntaxKind::Method, "increment");
+        find(&entities, SyntaxKind::Variable, "step");
     }
 
     #[test]

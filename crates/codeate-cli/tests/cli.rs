@@ -30,8 +30,11 @@ fn help_flag_exits_zero_and_prints_usage() {
 }
 
 #[test]
-fn no_args_exits_zero() {
+fn no_args_is_a_usage_error_since_a_subcommand_is_required() {
     let output = codeate().output().expect("run codeate with no args");
 
-    assert!(output.status.success());
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.to_lowercase().contains("usage"));
 }

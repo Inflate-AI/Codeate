@@ -20,4 +20,4 @@ pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};
 pub use model::{Edge, EdgeKind, EntityId, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
 pub use repository::{File, Repository};
-pub use symbols::ScopeTree;
+pub use symbols::{build_symbol_table, ScopeTree, SymbolTable, SymbolTableEntry};

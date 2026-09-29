@@ -725,6 +725,34 @@ fn resolve_instantiates(
     (symbols, edges)
 }
 
+/// Run reference, call, and instantiation resolution (tasks 2-4) over one
+/// function/method body in a single pass, combining their symbols/edges.
+fn resolve_body(
+    block: &syn::Block,
+    fn_symbol: &SymbolEntity,
+    scope_tree: &ScopeTree,
+    scope: usize,
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    let (ref_symbols, ref_edges) = resolve_references(block, fn_symbol, scope_tree, scope, symbol_table);
+    symbols.extend(ref_symbols);
+    edges.extend(ref_edges);
+
+    let (call_symbols, call_edges) = resolve_calls(block, fn_symbol, scope_tree, scope, symbol_table);
+    symbols.extend(call_symbols);
+    edges.extend(call_edges);
+
+    let (inst_symbols, inst_edges) =
+        resolve_instantiates(block, fn_symbol, scope_tree, scope, symbol_table);
+    symbols.extend(inst_symbols);
+    edges.extend(inst_edges);
+
+    (symbols, edges)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1247,6 +1275,62 @@ mod tests {
         assert!(inst_edges.contains(&Edge::new(
             run_symbol.id.clone(),
             meters_symbol.id.clone(),
+            EdgeKind::Instantiates
+        )));
+    }
+
+    #[test]
+    fn resolve_body_produces_the_full_reference_call_and_instantiate_edge_set() {
+        use crate::symbols::build_symbol_table;
+
+        let decls_source = "struct Point { x: i32, y: i32 } fn helper() {} fn run() {}";
+        let (entities, edges) = extract(decls_source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+        let helper_syntax = find(&entities, SyntaxKind::Function, "helper");
+        let point_syntax = find(&entities, SyntaxKind::Struct, "Point");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let helper_symbol = symbol_table.find_by_syntax_id(&helper_syntax.id).unwrap().clone();
+        let point_symbol = symbol_table.find_by_syntax_id(&point_syntax.id).unwrap().clone();
+
+        let body_source = "fn run() { \
+            let p = Point { x: 1, y: 2 }; \
+            helper(); \
+            std::process::exit(0); \
+            p \
+        }";
+        let block = parse_fn_block(body_source);
+
+        let (symbols, body_edges) =
+            resolve_body(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        // CALLS: helper() resolves; std::process::exit(0) gets a placeholder.
+        assert!(body_edges.contains(&Edge::new(run_symbol.id.clone(), helper_symbol.id.clone(), EdgeKind::Calls)));
+        let external_placeholder = symbols
+            .iter()
+            .find(|s| s.name.starts_with("external-path:"))
+            .expect("external call placeholder present");
+        assert!(body_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            external_placeholder.id.clone(),
+            EdgeKind::Calls
+        )));
+
+        // REFERENCES: calling helper() also references it by name.
+        assert!(body_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            helper_symbol.id.clone(),
+            EdgeKind::References
+        )));
+
+        // INSTANTIATES: the struct literal resolves to Point's Type symbol.
+        assert!(body_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            point_symbol.id.clone(),
             EdgeKind::Instantiates
         )));
     }

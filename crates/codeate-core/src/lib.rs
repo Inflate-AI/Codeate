@@ -5,6 +5,7 @@ pub mod detect;
 pub mod error;
 pub mod graph;
 pub mod hash;
+pub mod incremental;
 pub mod ingest;
 pub mod language;
 pub mod model;
@@ -25,6 +26,7 @@ pub use detect::{
 pub use error::{Error, Result};
 pub use graph::{diff, Graph, GraphDiff, IntegrityReport, Node};
 pub use hash::hash_bytes;
+pub use incremental::{affected_files, detect_changes, entities_owned_by, ChangeSet};
 pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};
 pub use model::{Edge, EdgeKind, EntityId, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};

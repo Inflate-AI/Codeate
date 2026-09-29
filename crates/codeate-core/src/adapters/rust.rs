@@ -301,6 +301,33 @@ fn extract_signature_types(
     (symbols, edges)
 }
 
+/// Extract `generics`' declared type parameters as `SymbolKind::Generic`
+/// symbols, `DECLARES`-edged from `owner_symbol` (the function/struct that
+/// declares them). Returns the symbols/edges plus the set of declared
+/// names, to thread into `extract_type`/`extract_signature_types`/
+/// `extract_struct_fields` so a matching usage resolves to
+/// `TypeRef::Generic` rather than an unrelated `Named`.
+fn extract_generic_params(
+    generics: &syn::Generics,
+    owner_symbol: &SymbolEntity,
+) -> (Vec<SymbolEntity>, Vec<Edge>, HashSet<String>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+    let mut names = HashSet::new();
+
+    for param in &generics.params {
+        if let syn::GenericParam::Type(type_param) = param {
+            let name = type_param.ident.to_string();
+            let symbol = SymbolEntity::new(SymbolKind::Generic, owner_symbol.id.as_str(), &name);
+            edges.push(Edge::new(owner_symbol.id.clone(), symbol.id.clone(), EdgeKind::Declares));
+            names.insert(name);
+            symbols.push(symbol);
+        }
+    }
+
+    (symbols, edges, names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +609,42 @@ mod tests {
 
         let point_type = type_symbol_for(&TypeRef::Named { name: "Point".to_string(), type_args: vec![] });
         assert!(edges.contains(&Edge::new(fn_symbol.id.clone(), point_type.id.clone(), EdgeKind::Returns)));
+    }
+
+    #[test]
+    fn extracts_a_generic_parameter_and_threads_it_into_signature_type_binding() {
+        let (sig, fn_symbol) = parse_fn("fn identity<T>(x: T) -> T { x }");
+        let file: syn::File = syn::parse_str("fn identity<T>(x: T) -> T { x }").unwrap();
+        let syn::Item::Fn(item_fn) = &file.items[0] else { unreachable!() };
+
+        let (generic_symbols, generic_edges, names) =
+            extract_generic_params(&item_fn.sig.generics, &fn_symbol);
+
+        assert_eq!(generic_symbols.len(), 1);
+        let t_symbol = &generic_symbols[0];
+        assert_eq!(t_symbol.kind, SymbolKind::Generic);
+        assert_eq!(t_symbol.name, "T");
+        assert!(generic_edges.contains(&Edge::new(fn_symbol.id.clone(), t_symbol.id.clone(), EdgeKind::Declares)));
+
+        let (_type_symbols, sig_edges) = extract_signature_types(&sig, &fn_symbol, &names);
+        let generic_type = type_symbol_for(&TypeRef::Generic("T".to_string()));
+
+        assert!(sig_edges.contains(&Edge::new(fn_symbol.id.clone(), generic_type.id.clone(), EdgeKind::Accepts)));
+        assert!(sig_edges.contains(&Edge::new(fn_symbol.id.clone(), generic_type.id.clone(), EdgeKind::Returns)));
+    }
+
+    #[test]
+    fn an_unresolvable_type_still_produces_an_explicit_unresolved_type_symbol() {
+        let (sig, fn_symbol) = parse_fn("fn describe() -> dyn std::fmt::Debug { unimplemented!() }");
+
+        let (symbols, edges) = extract_signature_types(&sig, &fn_symbol, &HashSet::new());
+
+        let returns_edge = edges.iter().find(|e| e.kind == EdgeKind::Returns).expect("a RETURNS edge");
+        let return_symbol = symbols.iter().find(|s| s.id == returns_edge.to).expect("return type symbol present");
+        // Not silently dropped: it's a real, present Type symbol, just not
+        // one of the classified variants -- an explicit Unresolved.
+        assert_eq!(return_symbol.kind, SymbolKind::Type);
+        assert!(!return_symbol.name.is_empty());
     }
 
     #[test]

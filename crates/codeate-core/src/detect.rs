@@ -11,9 +11,7 @@ use crate::repository::Repository;
 pub fn default_registry() -> LanguageRegistry {
     let mut registry = LanguageRegistry::new();
 
-    registry.register(
-        LanguageDescriptor::new(LanguageId::known("rust")).with_extensions(["rs"]),
-    );
+    registry.register(LanguageDescriptor::new(LanguageId::known("rust")).with_extensions(["rs"]));
     registry.register(
         LanguageDescriptor::new(LanguageId::known("python"))
             .with_extensions(["py"])
@@ -77,7 +75,10 @@ pub fn detect(path: &Path, bytes: &[u8], registry: &LanguageRegistry) -> Languag
 /// a new `Repository`. Re-reads each file's bytes from disk (under
 /// `repository.root`) so shebang-based fallback detection has content to
 /// inspect.
-pub fn detect_languages(repository: &Repository, registry: &LanguageRegistry) -> Result<Repository> {
+pub fn detect_languages(
+    repository: &Repository,
+    registry: &LanguageRegistry,
+) -> Result<Repository> {
     let mut files = Vec::with_capacity(repository.files.len());
 
     for file in &repository.files {

@@ -38,8 +38,9 @@ impl Config {
         }
 
         let text = std::fs::read_to_string(path)?;
-        toml::from_str(&text)
-            .map_err(|err| Error::Message(format!("invalid codeate.toml at {}: {err}", path.display())))
+        toml::from_str(&text).map_err(|err| {
+            Error::Message(format!("invalid codeate.toml at {}: {err}", path.display()))
+        })
     }
 }
 

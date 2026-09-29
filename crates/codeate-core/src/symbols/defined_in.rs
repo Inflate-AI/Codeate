@@ -10,9 +10,9 @@ pub fn defined_in_edges(table: &SymbolTable, syntax_edges: &[Edge]) -> Vec<Edge>
     let mut result = Vec::new();
 
     for entry in table.entries() {
-        let declaring_module = syntax_edges.iter().find(|edge| {
-            edge.kind == EdgeKind::Declares && edge.to == entry.syntax_id
-        });
+        let declaring_module = syntax_edges
+            .iter()
+            .find(|edge| edge.kind == EdgeKind::Declares && edge.to == entry.syntax_id);
 
         if let Some(declares_edge) = declaring_module {
             result.push(Edge::new(
@@ -81,7 +81,11 @@ mod tests {
         for declared in [&point, &shape] {
             let symbol = table.find_by_syntax_id(&declared.id).unwrap();
             let count = defined_in.iter().filter(|e| e.from == symbol.id).count();
-            assert_eq!(count, 1, "expected exactly one DEFINED_IN edge for {}", declared.name);
+            assert_eq!(
+                count, 1,
+                "expected exactly one DEFINED_IN edge for {}",
+                declared.name
+            );
         }
     }
 }

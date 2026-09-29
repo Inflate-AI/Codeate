@@ -44,7 +44,9 @@ impl SymbolTable {
 /// each id is derived from its originating (per-file, per-scope) syntax
 /// entity id.
 pub fn merge_symbol_tables(tables: Vec<SymbolTable>) -> SymbolTable {
-    let mut merged = SymbolTable { entries: Vec::new() };
+    let mut merged = SymbolTable {
+        entries: Vec::new(),
+    };
     for table in tables {
         merged.entries.extend(table.entries);
     }
@@ -73,14 +75,19 @@ fn symbol_kind_for(kind: SyntaxKind) -> Option<SymbolKind> {
 /// already encodes the entity's declaring scope), so it stays distinct per
 /// declaration site and deterministic across runs.
 pub fn build_symbol_table(entities: &[SyntaxEntity]) -> SymbolTable {
-    let mut table = SymbolTable { entries: Vec::new() };
+    let mut table = SymbolTable {
+        entries: Vec::new(),
+    };
 
     for entity in entities {
         let Some(kind) = symbol_kind_for(entity.kind) else {
             continue;
         };
         let symbol = SymbolEntity::new(kind, entity.id.as_str(), &entity.name);
-        table.entries.push(SymbolTableEntry { symbol, syntax_id: entity.id.clone() });
+        table.entries.push(SymbolTableEntry {
+            symbol,
+            syntax_id: entity.id.clone(),
+        });
     }
 
     table
@@ -117,7 +124,10 @@ mod tests {
 
     #[test]
     fn statements_and_expressions_resolve_to_no_symbol() {
-        let entities = vec![entity(SyntaxKind::Statement, "stmt_0"), entity(SyntaxKind::Expression, "expr_0")];
+        let entities = vec![
+            entity(SyntaxKind::Statement, "stmt_0"),
+            entity(SyntaxKind::Expression, "expr_0"),
+        ];
         let table = build_symbol_table(&entities);
         assert_eq!(table.symbols().count(), 0);
     }
@@ -128,7 +138,9 @@ mod tests {
         let entities = vec![point.clone()];
         let table = build_symbol_table(&entities);
 
-        let symbol = table.find_by_syntax_id(&point.id).expect("symbol for Point");
+        let symbol = table
+            .find_by_syntax_id(&point.id)
+            .expect("symbol for Point");
         assert_eq!(symbol.name, "Point");
         assert_eq!(symbol.kind, SymbolKind::Type);
     }
@@ -155,8 +167,12 @@ mod tests {
         let merged = merge_symbol_tables(vec![table_a, table_b]);
 
         assert_eq!(merged.symbols().count(), 2);
-        let symbol_a = merged.find_by_syntax_id(&a_entities[0].id).expect("a's Point");
-        let symbol_b = merged.find_by_syntax_id(&b_entities[0].id).expect("b's Point");
+        let symbol_a = merged
+            .find_by_syntax_id(&a_entities[0].id)
+            .expect("a's Point");
+        let symbol_b = merged
+            .find_by_syntax_id(&b_entities[0].id)
+            .expect("b's Point");
         assert_ne!(symbol_a.id, symbol_b.id);
     }
 
@@ -171,7 +187,13 @@ mod tests {
 
         let merged = merge_symbol_tables(vec![table_a, table_b]);
 
-        assert_eq!(merged.find_by_id(&run_id).map(|s| s.name.as_str()), Some("run"));
-        assert_eq!(merged.find_by_id(&walk_id).map(|s| s.name.as_str()), Some("walk"));
+        assert_eq!(
+            merged.find_by_id(&run_id).map(|s| s.name.as_str()),
+            Some("run")
+        );
+        assert_eq!(
+            merged.find_by_id(&walk_id).map(|s| s.name.as_str()),
+            Some("walk")
+        );
     }
 }

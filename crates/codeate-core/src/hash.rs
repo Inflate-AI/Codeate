@@ -38,6 +38,8 @@ mod tests {
     fn digest_is_a_fixed_length_lowercase_hex_string() {
         let digest = hash_bytes(b"some file content");
         assert_eq!(digest.len(), 64);
-        assert!(digest.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(digest
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 }

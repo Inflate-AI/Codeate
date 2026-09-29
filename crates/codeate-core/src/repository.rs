@@ -16,11 +16,7 @@ pub struct File {
 impl File {
     /// A file with no language classification yet (`LanguageId::Unknown`
     /// until `detect_languages` runs). Use `with_language` to attach one.
-    pub fn new(
-        path: impl Into<String>,
-        content_hash: impl Into<String>,
-        size_bytes: u64,
-    ) -> Self {
+    pub fn new(path: impl Into<String>, content_hash: impl Into<String>, size_bytes: u64) -> Self {
         Self {
             path: normalize_path(&path.into()),
             content_hash: content_hash.into(),

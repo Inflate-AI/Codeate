@@ -61,7 +61,11 @@ fn a_syntax_entity_can_be_linked_to_its_symbol_via_a_defined_in_edge() {
     let syntax_fn = SyntaxEntity::new(SyntaxKind::Function, "src/lib.rs", "run");
     let symbol_fn = SymbolEntity::new(SymbolKind::Function, "src/lib.rs", "run");
 
-    let edge = Edge::new(symbol_fn.id.clone(), syntax_fn.id.clone(), EdgeKind::DefinedIn);
+    let edge = Edge::new(
+        symbol_fn.id.clone(),
+        syntax_fn.id.clone(),
+        EdgeKind::DefinedIn,
+    );
 
     assert_eq!(edge.from, symbol_fn.id);
     assert_eq!(edge.to, syntax_fn.id);

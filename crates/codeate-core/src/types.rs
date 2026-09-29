@@ -7,7 +7,10 @@ pub enum TypeRef {
     /// A built-in primitive, e.g. `i32`, `bool`.
     Primitive(String),
     /// A user-defined type, possibly generic (`Vec<i32>`, `Point`).
-    Named { name: String, type_args: Vec<TypeRef> },
+    Named {
+        name: String,
+        type_args: Vec<TypeRef>,
+    },
     /// A reference to another type (`&T`, `&mut T`).
     Reference { mutable: bool, inner: Box<TypeRef> },
     /// A generic type parameter in scope (`T`).
@@ -26,7 +29,11 @@ impl TypeRef {
         match self {
             TypeRef::Primitive(name) => format!("primitive:{name}"),
             TypeRef::Named { name, type_args } => {
-                let args = type_args.iter().map(TypeRef::key).collect::<Vec<_>>().join(",");
+                let args = type_args
+                    .iter()
+                    .map(TypeRef::key)
+                    .collect::<Vec<_>>()
+                    .join(",");
                 format!("named:{name}<{args}>")
             }
             TypeRef::Reference { mutable, inner } => {
@@ -43,11 +50,19 @@ impl TypeRef {
             TypeRef::Primitive(name) | TypeRef::Generic(name) => name.clone(),
             TypeRef::Named { name, type_args } if type_args.is_empty() => name.clone(),
             TypeRef::Named { name, type_args } => {
-                let args = type_args.iter().map(TypeRef::display_name).collect::<Vec<_>>().join(", ");
+                let args = type_args
+                    .iter()
+                    .map(TypeRef::display_name)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!("{name}<{args}>")
             }
             TypeRef::Reference { mutable, inner } => {
-                format!("&{}{}", if *mutable { "mut " } else { "" }, inner.display_name())
+                format!(
+                    "&{}{}",
+                    if *mutable { "mut " } else { "" },
+                    inner.display_name()
+                )
             }
             TypeRef::Unresolved(raw) => raw.clone(),
         }
@@ -83,7 +98,10 @@ mod tests {
     #[test]
     fn primitive_and_named_of_the_same_display_name_get_distinct_ids() {
         let primitive = TypeRef::Primitive("Meters".to_string());
-        let named = TypeRef::Named { name: "Meters".to_string(), type_args: vec![] };
+        let named = TypeRef::Named {
+            name: "Meters".to_string(),
+            type_args: vec![],
+        };
         assert_ne!(type_symbol_for(&primitive).id, type_symbol_for(&named).id);
     }
 
@@ -97,7 +115,10 @@ mod tests {
             name: "Vec".to_string(),
             type_args: vec![TypeRef::Primitive("i64".to_string())],
         };
-        assert_ne!(type_symbol_for(&vec_of_i32).id, type_symbol_for(&vec_of_i64).id);
+        assert_ne!(
+            type_symbol_for(&vec_of_i32).id,
+            type_symbol_for(&vec_of_i64).id
+        );
         assert_eq!(type_symbol_for(&vec_of_i32).name, "Vec<i32>");
     }
 

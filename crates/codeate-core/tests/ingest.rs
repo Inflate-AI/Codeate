@@ -49,7 +49,10 @@ fn ingest_computes_size_and_hash_for_each_file() {
 
     let expected_bytes = std::fs::read(fixture("basic_repo").join("src/lib.rs")).unwrap();
     assert_eq!(lib_rs.size_bytes, expected_bytes.len() as u64);
-    assert_eq!(lib_rs.content_hash, codeate_core::hash_bytes(&expected_bytes));
+    assert_eq!(
+        lib_rs.content_hash,
+        codeate_core::hash_bytes(&expected_bytes)
+    );
 }
 
 #[test]
@@ -65,6 +68,9 @@ fn ingesting_the_same_repository_twice_produces_identical_results() {
     let first = codeate_core::ingest(&root).expect("first ingest");
     let second = codeate_core::ingest(&root).expect("second ingest");
 
-    assert_eq!(first, second, "two ingestion runs over the same repo diverged");
+    assert_eq!(
+        first, second,
+        "two ingestion runs over the same repo diverged"
+    );
     assert!(!first.files.is_empty(), "fixture repo unexpectedly empty");
 }

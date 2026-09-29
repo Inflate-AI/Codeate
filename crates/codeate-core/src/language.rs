@@ -89,9 +89,8 @@ mod tests {
     #[test]
     fn registering_a_descriptor_makes_it_findable_by_extension() {
         let mut registry = LanguageRegistry::new();
-        registry.register(
-            LanguageDescriptor::new(LanguageId::known("rust")).with_extensions(["rs"]),
-        );
+        registry
+            .register(LanguageDescriptor::new(LanguageId::known("rust")).with_extensions(["rs"]));
 
         assert_eq!(
             registry.by_extension("rs"),
@@ -102,9 +101,8 @@ mod tests {
     #[test]
     fn extension_lookup_is_case_insensitive() {
         let mut registry = LanguageRegistry::new();
-        registry.register(
-            LanguageDescriptor::new(LanguageId::known("rust")).with_extensions(["rs"]),
-        );
+        registry
+            .register(LanguageDescriptor::new(LanguageId::known("rust")).with_extensions(["rs"]));
 
         assert_eq!(
             registry.by_extension("RS"),

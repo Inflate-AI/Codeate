@@ -7,6 +7,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 7] — Reference & Call Resolution
+
+### Added
+
+- Explicit unresolved-reference placeholder (`resolve/unresolved.rs`): `unresolved_symbol(reason, name)`
+  gives every unresolvable reference/call a canonical, deterministic `SymbolEntity` (the reason folded
+  into the symbol's own name, e.g. `"external-path:std::process::exit"`), so an edge to it is always
+  real, never a silently dropped reference -- built TDD, 4 unit tests.
+- `REFERENCES` edges (`resolve_references` in `adapters/rust.rs`): walks a function/method body's
+  common expression forms for single-segment identifier usages, resolving each via the Phase 5
+  `ScopeTree`; an undefined name gets an explicit `unknown-local` placeholder -- built TDD, 2 unit
+  tests.
+- `CALLS` edges (`resolve_calls`): resolves free-function calls via scope lookup and method calls by
+  best-effort name match against any `Method` symbol in the file (full receiver-type dispatch needs
+  Phase 8's `OVERRIDES`/`IMPLEMENTS`, out of scope here); multi-segment/external callee paths get an
+  explicit `external-path` placeholder -- built TDD, 3 unit tests.
+- `INSTANTIATES` edges (`resolve_instantiates`): struct literals always resolve to the struct's `Type`
+  symbol (real one in scope, else a `Named`-type stand-in for an external struct); tuple-struct-style
+  calls are only treated as a constructor when the callee resolves in scope to a `Type` symbol -- an
+  unrecognized call is left to `resolve_calls`, not guessed at -- built TDD, 2 unit tests.
+- Combined per-body resolution pass (`resolve_body`): ties reference/call/instantiation resolution
+  together into one walk over a function/method body -- built TDD, 1 integration-style test exercising
+  a reference, a resolved call, an unresolved external call, and an instantiation together.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (129 tests total: 115 `codeate-core` unit, 3 symbols end-to-end, 1
+  golden-file, 4 model invariant, 1 detect, 5 ingest, 3 CLI) via `scripts/check.ps1`.
+
 ## [Phase 6] — Type Resolution
 
 ### Added

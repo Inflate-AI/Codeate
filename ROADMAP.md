@@ -119,7 +119,7 @@ Resolve static type information for symbols, fields, parameters, and return valu
 ---
 
 ## Phase 7 — Reference & Call Resolution
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Semantic Analysis (references, calls).*
 

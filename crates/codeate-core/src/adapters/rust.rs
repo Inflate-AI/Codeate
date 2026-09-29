@@ -148,8 +148,15 @@ fn extract_body(
         match stmt {
             syn::Stmt::Local(local) => {
                 if let syn::Pat::Ident(pat_ident) = &local.pat {
-                    let entity =
-                        SyntaxEntity::new(SyntaxKind::Variable, scope, pat_ident.ident.to_string());
+                    // Location includes the statement index so redeclaring
+                    // the same name in the same scope (`let x = 1; let x =
+                    // 2;`) produces two distinct entities/ids, not a
+                    // collision.
+                    let entity = SyntaxEntity::new(
+                        SyntaxKind::Variable,
+                        &format!("{scope}#{index}"),
+                        pat_ident.ident.to_string(),
+                    );
                     contain(parent, entity, entities, edges);
                 }
             }
@@ -294,6 +301,19 @@ mod tests {
 
         find(&entities, SyntaxKind::Method, "increment");
         find(&entities, SyntaxKind::Variable, "step");
+    }
+
+    #[test]
+    fn redeclaring_the_same_name_in_the_same_scope_produces_distinct_variables() {
+        let (entities, _edges) = extract("fn run() { let x = 1; let x = 2; }");
+
+        let xs: Vec<&SyntaxEntity> = entities
+            .iter()
+            .filter(|e| e.kind == SyntaxKind::Variable && e.name == "x")
+            .collect();
+
+        assert_eq!(xs.len(), 2);
+        assert_ne!(xs[0].id, xs[1].id);
     }
 
     #[test]

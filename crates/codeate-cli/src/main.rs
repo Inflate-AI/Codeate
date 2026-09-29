@@ -68,14 +68,45 @@ enum QueryKind {
 fn main() {
     let cli = Cli::parse();
 
-    match cli.command {
-        Command::Analyze(_args) => {
-            eprintln!("codeate analyze: not yet implemented");
-            std::process::exit(1);
-        }
+    let result = match cli.command {
+        Command::Analyze(args) => run_analyze(args),
         Command::Query(_args) => {
             eprintln!("codeate query: not yet implemented");
             std::process::exit(1);
         }
+    };
+
+    if let Err(message) = result {
+        eprintln!("error: {message}");
+        std::process::exit(1);
     }
+}
+
+fn run_analyze(args: AnalyzeArgs) -> Result<(), String> {
+    let out_path = args
+        .out
+        .unwrap_or_else(|| args.path.join(".codeate").join("graph.json"));
+
+    let repository = codeate_core::ingest(&args.path).map_err(|err| err.to_string())?;
+    let registry = codeate_core::default_registry();
+    let repository =
+        codeate_core::detect_languages(&repository, &registry).map_err(|err| err.to_string())?;
+    let analysis = codeate_core::analyze_repository(&repository).map_err(|err| err.to_string())?;
+    let stored = codeate_core::StoredGraph::from_analysis(&analysis);
+
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    codeate_core::store::save(&out_path, &stored).map_err(|err| err.to_string())?;
+
+    println!(
+        "analyzed {} files -> {} syntax entities, {} symbols, {} edges",
+        repository.files.len(),
+        analysis.syntax_entities.len(),
+        analysis.symbols.len(),
+        analysis.edges.len(),
+    );
+    println!("graph written to {}", out_path.display());
+
+    Ok(())
 }

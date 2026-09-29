@@ -11,3 +11,7 @@ path = "src/main.rs"
 [dependencies]
 codeate-core = { path = "../codeate-core" }
 clap.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

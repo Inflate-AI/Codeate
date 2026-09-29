@@ -1,15 +1,21 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::graph::{diff, Graph, GraphDiff, IntegrityReport};
-use crate::model::{Edge, SymbolEntity, SyntaxEntity};
-use crate::pipeline::AnalysisResult;
+use crate::model::{Edge, EntityId, SymbolEntity, SyntaxEntity};
+use crate::pipeline::{analyze_incremental, AnalysisResult};
+use crate::repository::{File, Repository};
 
 /// The current on-disk schema version. Bump this whenever `StoredGraph`'s
 /// shape changes in a way that breaks reading an older file, and extend
 /// `load`'s version check accordingly rather than silently misreading old
 /// data.
-pub const CURRENT_VERSION: u32 = 1;
+///
+/// v2 (Phase 13) added `files` and `owner_file` so incremental analysis can
+/// detect changes and find what a changed file's data to invalidate without
+/// re-parsing everything.
+pub const CURRENT_VERSION: u32 = 2;
 
 /// The full Code Graph in its on-disk form: every syntax entity, symbol, and
 /// edge from a `pipeline::AnalysisResult`, plus an explicit schema version.
@@ -21,15 +27,24 @@ pub struct StoredGraph {
     pub syntax_entities: Vec<SyntaxEntity>,
     pub symbols: Vec<SymbolEntity>,
     pub edges: Vec<Edge>,
+    /// The repository's files (path, content hash) as of this analysis --
+    /// Phase 13's change detection compares a fresh ingest against this.
+    #[serde(default)]
+    pub files: Vec<File>,
+    /// Which file each syntax entity / symbol came from.
+    #[serde(default)]
+    pub owner_file: HashMap<EntityId, String>,
 }
 
 impl StoredGraph {
-    pub fn from_analysis(result: &AnalysisResult) -> Self {
+    pub fn from_analysis(result: &AnalysisResult, files: &[File]) -> Self {
         Self {
             version: CURRENT_VERSION,
             syntax_entities: result.syntax_entities.clone(),
             symbols: result.symbols.clone(),
             edges: result.edges.clone(),
+            files: files.to_vec(),
+            owner_file: result.owner_file.clone(),
         }
     }
 
@@ -38,6 +53,37 @@ impl StoredGraph {
     /// was persisted).
     pub fn into_graph(self) -> (Graph, IntegrityReport) {
         Graph::build(self.syntax_entities, self.symbols, self.edges)
+    }
+
+    /// This state's contents as an `AnalysisResult`, for feeding back into
+    /// `analyze_incremental`.
+    fn as_analysis_result(&self) -> AnalysisResult {
+        AnalysisResult {
+            syntax_entities: self.syntax_entities.clone(),
+            symbols: self.symbols.clone(),
+            edges: self.edges.clone(),
+            owner_file: self.owner_file.clone(),
+        }
+    }
+
+    /// Patch this stored state against `repository`'s current contents:
+    /// re-analyze only what changed (Phase 13's `analyze_incremental`),
+    /// drop everything owned by removed files, merge in the rest, and
+    /// re-run Phase 9's integrity checks on the result before it's
+    /// considered valid. Equivalent to a full re-`analyze` + `from_analysis`
+    /// for the same `repository`, just without redoing unaffected work.
+    pub fn update_incremental(&self, repository: &Repository) -> Result<(Self, IntegrityReport)> {
+        let previous_result = self.as_analysis_result();
+        let updated_result = analyze_incremental(repository, &self.files, &previous_result)?;
+        let updated = Self::from_analysis(&updated_result, &repository.files);
+
+        let (_, report) = Graph::build(
+            updated.syntax_entities.clone(),
+            updated.symbols.clone(),
+            updated.edges.clone(),
+        );
+
+        Ok((updated, report))
     }
 }
 
@@ -167,7 +213,77 @@ mod tests {
             syntax_entities: vec![module, point],
             symbols: vec![],
             edges: vec![edge],
+            files: vec![],
+            owner_file: HashMap::new(),
         }
+    }
+
+    struct TempRepo {
+        root: std::path::PathBuf,
+    }
+
+    impl TempRepo {
+        fn new(files: &[(&str, &str)]) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "codeate-store-repo-test-{}-{}",
+                std::process::id(),
+                unique_suffix()
+            ));
+            std::fs::create_dir_all(&root).expect("create temp repo root");
+            for (path, content) in files {
+                let full = root.join(path);
+                if let Some(parent) = full.parent() {
+                    std::fs::create_dir_all(parent).expect("create temp repo subdir");
+                }
+                std::fs::write(&full, content).expect("write temp repo file");
+            }
+            Self { root }
+        }
+
+        fn hashed(&self) -> Repository {
+            let repository = crate::ingest::ingest(&self.root).expect("ingest succeeds");
+            let registry = crate::detect::default_registry();
+            crate::detect::detect_languages(&repository, &registry).expect("detect succeeds")
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn update_incremental_patches_and_reintegrity_checks_a_stored_graph() {
+        let repo = TempRepo::new(&[("src/lib.rs", "struct Point { x: i32 }")]);
+        let repository = repo.hashed();
+
+        let analysis = crate::pipeline::analyze_repository(&repository).expect("analyze");
+        let stored = StoredGraph::from_analysis(&analysis, &repository.files);
+
+        std::fs::write(
+            repo.root.join("src/lib.rs"),
+            "struct Point { x: i32 }\nstruct Line { a: i32 }",
+        )
+        .expect("rewrite lib.rs");
+        let updated_repository = repo.hashed();
+
+        let (patched, report) = stored
+            .update_incremental(&updated_repository)
+            .expect("update_incremental succeeds");
+
+        assert!(report.is_clean());
+        assert!(patched
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Struct && e.name == "Line"));
+
+        let full_rebuild = crate::pipeline::analyze_repository(&updated_repository)
+            .expect("full rebuild succeeds");
+        let full_stored = StoredGraph::from_analysis(&full_rebuild, &updated_repository.files);
+        let (patched_graph, _) = patched.into_graph();
+        let (full_graph, _) = full_stored.into_graph();
+        assert_eq!(patched_graph.canonical_form(), full_graph.canonical_form());
     }
 
     #[test]
@@ -196,6 +312,41 @@ mod tests {
             loaded_graph.canonical_form()
         );
         assert!(report.is_clean());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn files_and_owner_file_round_trip_through_save_and_load() {
+        let path = temp_path("files-roundtrip.json");
+        let mut stored = sample();
+        stored.files = vec![File::new("src/lib.rs", "abc123", 42)];
+        stored.owner_file.insert(
+            stored.syntax_entities[0].id.clone(),
+            "src/lib.rs".to_string(),
+        );
+
+        save(&path, &stored).expect("save succeeds");
+        let loaded = load(&path).expect("load succeeds");
+
+        assert_eq!(loaded, stored);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn loading_a_v1_file_with_no_files_or_owner_file_defaults_them_to_empty() {
+        let path = temp_path("v1-legacy.json");
+        let legacy_json = r#"{
+            "version": 1,
+            "syntax_entities": [],
+            "symbols": [],
+            "edges": []
+        }"#;
+        std::fs::write(&path, legacy_json).expect("write legacy json");
+
+        let loaded = load(&path).expect("load succeeds despite missing fields");
+
+        assert!(loaded.files.is_empty());
+        assert!(loaded.owner_file.is_empty());
         let _ = std::fs::remove_file(&path);
     }
 

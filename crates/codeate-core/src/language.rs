@@ -1,6 +1,6 @@
 /// The language a file is classified as. Detection always yields a
 /// `LanguageId` — an unrecognized file is `Unknown`, never silently dropped.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum LanguageId {
     Known(String),
     Unknown,

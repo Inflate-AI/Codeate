@@ -5,7 +5,7 @@ use crate::language::LanguageId;
 /// A single file within an ingested repository, identified by a path that is
 /// normalized (forward-slash separated) and relative to the repository root,
 /// so identity does not depend on the host OS's path separator.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct File {
     pub path: String,
     pub content_hash: String,

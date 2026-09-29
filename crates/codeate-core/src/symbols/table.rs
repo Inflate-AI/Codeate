@@ -29,6 +29,26 @@ impl SymbolTable {
             .find(|entry| &entry.syntax_id == syntax_id)
             .map(|entry| &entry.symbol)
     }
+
+    /// The symbol with the given `EntityId`, if any.
+    pub fn find_by_id(&self, id: &EntityId) -> Option<&SymbolEntity> {
+        self.entries
+            .iter()
+            .find(|entry| &entry.symbol.id == id)
+            .map(|entry| &entry.symbol)
+    }
+}
+
+/// Combine multiple per-file `SymbolTable`s into one repository-level
+/// table. Symbols from separate files never collide on `EntityId`, since
+/// each id is derived from its originating (per-file, per-scope) syntax
+/// entity id.
+pub fn merge_symbol_tables(tables: Vec<SymbolTable>) -> SymbolTable {
+    let mut merged = SymbolTable { entries: Vec::new() };
+    for table in tables {
+        merged.entries.extend(table.entries);
+    }
+    merged
 }
 
 /// Map a `SyntaxKind` to the `SymbolKind` it resolves to. `Statement` and
@@ -119,5 +139,39 @@ mod tests {
         let table = build_symbol_table(&entities);
         let symbol = table.symbols().next().expect("one symbol");
         assert_eq!(symbol.name, "run");
+    }
+
+    fn entity_at(location: &str, kind: SyntaxKind, name: &str) -> SyntaxEntity {
+        SyntaxEntity::new(kind, location, name)
+    }
+
+    #[test]
+    fn merging_tables_from_different_files_keeps_every_symbol_without_collision() {
+        let a_entities = vec![entity_at("src/a.rs", SyntaxKind::Struct, "Point")];
+        let b_entities = vec![entity_at("src/b.rs", SyntaxKind::Struct, "Point")];
+        let table_a = build_symbol_table(&a_entities);
+        let table_b = build_symbol_table(&b_entities);
+
+        let merged = merge_symbol_tables(vec![table_a, table_b]);
+
+        assert_eq!(merged.symbols().count(), 2);
+        let symbol_a = merged.find_by_syntax_id(&a_entities[0].id).expect("a's Point");
+        let symbol_b = merged.find_by_syntax_id(&b_entities[0].id).expect("b's Point");
+        assert_ne!(symbol_a.id, symbol_b.id);
+    }
+
+    #[test]
+    fn merged_table_finds_symbols_from_any_input_file_by_id() {
+        let a_entities = vec![entity_at("src/a.rs", SyntaxKind::Function, "run")];
+        let b_entities = vec![entity_at("src/b.rs", SyntaxKind::Function, "walk")];
+        let table_a = build_symbol_table(&a_entities);
+        let table_b = build_symbol_table(&b_entities);
+        let run_id = table_a.symbols().next().unwrap().id.clone();
+        let walk_id = table_b.symbols().next().unwrap().id.clone();
+
+        let merged = merge_symbol_tables(vec![table_a, table_b]);
+
+        assert_eq!(merged.find_by_id(&run_id).map(|s| s.name.as_str()), Some("run"));
+        assert_eq!(merged.find_by_id(&walk_id).map(|s| s.name.as_str()), Some("walk"));
     }
 }

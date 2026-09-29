@@ -9,6 +9,7 @@ pub mod language;
 pub mod model;
 pub mod repository;
 pub mod symbols;
+pub mod types;
 
 pub use adapter::LanguageAdapter;
 pub use adapters::RustAdapter;
@@ -24,3 +25,4 @@ pub use symbols::{
     build_symbol_table, defined_in_edges, merge_symbol_tables, ScopeTree, SymbolTable,
     SymbolTableEntry,
 };
+pub use types::{type_symbol_for, TypeRef};

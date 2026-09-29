@@ -143,6 +143,43 @@ fn print_json(value: &serde_json::Value) {
     println!("{}", serde_json::to_string_pretty(value).expect("value is serializable"));
 }
 
+fn node_json(node: &codeate_core::Node) -> serde_json::Value {
+    match node {
+        codeate_core::Node::Symbol(symbol) => symbol_json(symbol),
+        codeate_core::Node::Syntax(entity) => syntax_json(entity),
+    }
+}
+
+fn print_id_list(
+    graph: &codeate_core::Graph,
+    ids: &[codeate_core::EntityId],
+    empty_message: &str,
+    json: bool,
+) {
+    if json {
+        let value: Vec<serde_json::Value> = ids
+            .iter()
+            .filter_map(|id| graph.node(id))
+            .map(node_json)
+            .collect();
+        print_json(&serde_json::Value::Array(value));
+    } else if ids.is_empty() {
+        println!("{empty_message}");
+    } else {
+        for id in ids {
+            match graph.node(id) {
+                Some(codeate_core::Node::Symbol(s)) => {
+                    println!("{}  {}  {}", s.id.as_str(), s.kind.as_str(), s.name)
+                }
+                Some(codeate_core::Node::Syntax(s)) => {
+                    println!("{}  {}  {}", s.id.as_str(), s.kind.as_str(), s.name)
+                }
+                None => println!("{}  (unknown node)", id.as_str()),
+            }
+        }
+    }
+}
+
 fn print_symbol_list(matches: &[&codeate_core::SymbolEntity], empty_message: &str, json: bool) {
     if json {
         let value: Vec<serde_json::Value> = matches.iter().copied().map(symbol_json).collect();
@@ -218,10 +255,16 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
             Ok(())
         }
         QueryKind::Dependencies { id } => {
-            Err(format!("query dependencies --id {id}: not yet implemented"))
+            let id = parse_id(&id)?;
+            require_symbol(&engine, &id)?;
+            print_id_list(&graph, &engine.dependencies_of(&id), "no dependencies", json);
+            Ok(())
         }
         QueryKind::Dependents { id } => {
-            Err(format!("query dependents --id {id}: not yet implemented"))
+            let id = parse_id(&id)?;
+            require_symbol(&engine, &id)?;
+            print_id_list(&graph, &engine.dependents_of(&id), "no dependents", json);
+            Ok(())
         }
         QueryKind::Implementers { id } => {
             Err(format!("query implementers --id {id}: not yet implemented"))

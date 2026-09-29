@@ -298,6 +298,63 @@ fn query_callers_rejects_an_unknown_id() {
 }
 
 #[test]
+fn query_dependencies_and_dependents_follow_a_cross_file_import() {
+    let repo = TempRepo::new(&[
+        ("src/shape.rs", "pub trait Shape { fn area(&self) -> f64; }"),
+        (
+            "src/circle.rs",
+            "use crate::shape::Shape;\npub struct Circle;\nimpl Shape for Circle { fn area(&self) -> f64 { 0.0 } }",
+        ),
+    ]);
+    let store = analyze(&repo);
+    let circle_module_id = symbol_id(&store, "src/circle.rs");
+    let shape_id = symbol_id(&store, "Shape");
+
+    let deps = codeate()
+        .args(["query", "dependencies", "--id", &circle_module_id, "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query dependencies");
+    assert!(deps.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&deps.stdout).expect("valid json");
+    assert!(value
+        .as_array()
+        .expect("json array")
+        .iter()
+        .any(|v| v["name"] == "Shape"));
+
+    let dependents = codeate()
+        .args(["query", "dependents", "--id", &shape_id, "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query dependents");
+    assert!(dependents.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&dependents.stdout).expect("valid json");
+    assert!(value
+        .as_array()
+        .expect("json array")
+        .iter()
+        .any(|v| v["name"] == "src/circle.rs"));
+}
+
+#[test]
+fn query_dependencies_rejects_an_unknown_id() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "dependencies", "--id", "not-a-real-id", "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query dependencies");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
 fn query_definition_rejects_an_unknown_id() {
     let repo = TempRepo::new(&[("src/lib.rs", "pub struct Point { pub x: i32 }")]);
     let store = analyze(&repo);

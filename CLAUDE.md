@@ -87,3 +87,34 @@ until the current phase is closed.
 - Prefer explicit, deterministic code over cleverness — this matches the project's own
   design principle (see README "Design Principles → Deterministic").
 - No LLM/embedding dependencies in the core analysis path, per the project's non-goals.
+
+---
+
+## Toolchain location (Windows-specific — read before running any `cargo`/`rustc`/`rustup` command)
+
+The Rust toolchain lives on **`D:\`**, not the default `C:\Users\<user>\.cargo` /
+`.rustup` location:
+
+```
+CARGO_HOME  = D:\cargo
+RUSTUP_HOME = D:\rustup
+```
+
+The Windows user-level `PATH` and `CARGO_HOME`/`RUSTUP_HOME` environment variables are
+set correctly at the OS level, but **tool shells spawned in an agent session may inherit
+a stale/parent-process environment that doesn't see them** — `cargo`/`rustc` can appear
+completely missing even though the toolchain is installed and fine. If that happens:
+
+1. **Do not reinstall the toolchain.** It is not actually missing — the shell just can't
+   see it. Reinstalling to the default `C:\` location creates a confusing duplicate
+   install and masks the real (environment) problem. (This happened once already — see
+   `CHANGELOG.md`'s Phase 8 entry for the fallout, since deleted and moved back to `D:\`.)
+2. Verify first: `ls D:\cargo\bin` / `ls D:\rustup` should show the installed binaries
+   and toolchains.
+3. Set the environment explicitly for the session/command instead:
+   - PowerShell: `$env:CARGO_HOME = "D:\cargo"; $env:RUSTUP_HOME = "D:\rustup"; $env:PATH = "D:\cargo\bin;$env:PATH"`
+   - Bash: `export CARGO_HOME=/d/cargo; export RUSTUP_HOME=/d/rustup; export PATH="/d/cargo/bin:$PATH"`
+   - Without `RUSTUP_HOME`/`CARGO_HOME` set, `cargo`/`rustc` fall back to the default
+     `~/.cargo`/`~/.rustup` location even if `D:\cargo\bin` is first on `PATH` (the
+     binaries there are rustup proxies that need `RUSTUP_HOME` to find the actual
+     toolchain) — setting `PATH` alone is not enough.

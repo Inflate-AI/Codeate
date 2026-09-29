@@ -7,6 +7,16 @@
 # "All checks passed."
 $ErrorActionPreference = "Stop"
 
+# The toolchain lives on D:\, not the default C:\Users\<user>\.cargo/.rustup
+# (see CLAUDE.md's "Toolchain location" section) -- an agent's tool shell can
+# inherit a stale environment that doesn't see the user-level CARGO_HOME/
+# RUSTUP_HOME/PATH, so set them explicitly here rather than relying on that.
+if (Test-Path "D:\cargo\bin") {
+    $env:CARGO_HOME = "D:\cargo"
+    $env:RUSTUP_HOME = "D:\rustup"
+    $env:PATH = "D:\cargo\bin;$env:PATH"
+}
+
 function Invoke-Step {
     param([string]$Name, [scriptblock]$Command)
     Write-Host "==> $Name"

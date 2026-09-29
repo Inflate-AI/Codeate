@@ -1,3 +1,4 @@
+pub mod adapter;
 pub mod config;
 pub mod detect;
 pub mod error;
@@ -7,6 +8,7 @@ pub mod language;
 pub mod model;
 pub mod repository;
 
+pub use adapter::LanguageAdapter;
 pub use config::Config;
 pub use detect::{default_registry, detect, detect_by_content, detect_by_extension, detect_languages};
 pub use error::{Error, Result};

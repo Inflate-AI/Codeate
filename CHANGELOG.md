@@ -7,6 +7,45 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 6] — Type Resolution
+
+### Added
+
+- `TypeRef` model and canonical type symbols (`types.rs`): a closed representation --
+  `Primitive`, `Named { name, type_args }`, `Reference { mutable, inner }`, `Generic`,
+  `Unresolved(raw)` -- plus `type_symbol_for()` giving every `TypeRef` a deterministic
+  `SymbolKind::Type` symbol, keyed so structurally different types (including
+  same-named primitive vs. named, or differing generic args) never collide -- built TDD,
+  6 unit tests.
+- Rust type-expression extraction (`extract_type` in `adapters/rust.rs`): maps
+  `syn::Type::Path` to `Primitive`/`Named`/`Generic` (18 built-in primitives, plus
+  generic parameters recognized by name), `syn::Type::Reference` to `Reference`,
+  everything else (tuples, trait objects, ...) to `Unresolved` with raw source text via
+  `quote` -- built TDD, 6 unit tests.
+- Struct field extraction (`extract_struct_fields`): Rust fields have no `SyntaxKind`
+  counterpart in the closed Phase 3 model (only the symbol side has `Field`), so fields
+  are extracted directly from `syn::ItemStruct` as `SymbolKind::Field` symbols,
+  `DECLARES`-edged from the struct's `Type` symbol and `DEPENDS_ON`-edged to their
+  resolved type -- built TDD, 2 unit tests.
+- Parameter/return type binding (`extract_signature_types`): `ACCEPTS` edges from a
+  function/method symbol to each parameter's type symbol, and a `RETURNS` edge to its
+  return type symbol, defaulting to the unit type `()` when unspecified -- built TDD, 3
+  unit tests.
+- Generic parameters and explicit unresolved types (`extract_generic_params`): extracts
+  `<T: Bound>` as `SymbolKind::Generic` symbols (`DECLARES`-edged from their owner) and
+  threads the declared names through so matching usages resolve to `TypeRef::Generic`;
+  confirmed a genuinely unresolvable type (`dyn Trait`) still produces a present,
+  explicit `Unresolved` type symbol rather than being dropped -- built TDD, 2 unit
+  tests.
+- New dependencies: `quote`, `proc-macro2` (both already transitive via `syn`).
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (120 tests total: 103 `codeate-core` unit, 3 symbols
+  end-to-end, 1 golden-file, 4 model invariant, 1 detect, 5 ingest, 3 CLI) via
+  `scripts/check.ps1`.
+
 ## [Phase 5] — Symbol Resolution
 
 ### Added

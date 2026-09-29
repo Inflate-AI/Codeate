@@ -105,7 +105,7 @@ Resolve declared names to `Symbol` entities with stable identity and scope.
 ---
 
 ## Phase 6 — Type Resolution
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Symbol & Type Resolution (types).*
 

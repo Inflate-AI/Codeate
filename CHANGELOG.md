@@ -7,6 +7,57 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 13] — Incremental Analysis
+
+### Added
+
+- Schema v2 (`store::CURRENT_VERSION`): `StoredGraph` now persists the repository's file
+  manifest (path + content hash, from Phase 1) and an entity→owning-file map alongside
+  the graph itself. Both `File` and `LanguageId` gained `serde` derives to support this.
+  A v1 file with neither field still loads (`#[serde(default)]`) rather than erroring.
+- Entity ownership tracking through `pipeline::analyze_repository`: `AnalysisResult`
+  gained an `owner_file: HashMap<EntityId, String>` field, populated for every syntax
+  entity and every resolved symbol (not just declared ones), so later phases always know
+  which file produced a given piece of the graph.
+- Change detection (`incremental.rs`, new module): `detect_changes(previous_files,
+  current_files) -> ChangeSet { added, modified, removed }`, compared by path + content
+  hash — no re-parsing needed to know something changed.
+- Affected-structure computation: `affected_files()` starts from a `ChangeSet` and walks
+  every semantic edge kind (`IMPORTS`/`EXPORTS`/`REFERENCES`/`CALLS`/`EXTENDS`/
+  `IMPLEMENTS`/`OVERRIDES`/`INSTANTIATES`/`RETURNS`/`ACCEPTS`/`DEPENDS_ON`) backwards from
+  a changed file's entities to find every other file that must be re-resolved too (a
+  file that imports from, calls into, or implements something in a changed file).
+  Removed files are never included in the result — nothing left to re-parse there.
+- Incremental re-analysis (`pipeline::analyze_incremental`, refactored out of
+  `analyze_repository`'s body into a shared `run_pipeline` taking an optional file
+  filter and a `CarryIn` of reused data): only the affected file set is re-parsed and
+  re-resolved; every other file's syntax entities, resolved symbols, and non-structural
+  edges are carried over from the previous run. The merged symbol table always includes
+  the carried-over files' entities too, so cross-file resolution against unaffected
+  files' symbols stays correct. `DEFINED_IN` and `DEPENDS_ON` are always recomputed
+  fresh (cheap, and must reflect the full merged state). A no-op change set short-circuits
+  to the previous result unchanged.
+- Patch + re-verify (`StoredGraph::update_incremental`): runs `analyze_incremental`
+  against a stored graph and rebuilds a `Graph` from the result to re-run Phase 9's
+  integrity checks before the patched state is considered valid — a patched graph is
+  never assumed correct just because it was assembled incrementally.
+- CLI: `codeate analyze <path>` now reuses an existing graph at the target path
+  incrementally by default (via `StoredGraph::update_incremental`); `--full` forces a
+  full rebuild regardless. The summary line now says which mode ran (`analyzed fully` /
+  `analyzed incrementally`).
+
+### Verified
+
+- Correctness: every incremental scenario (file added, file modified, file removed, and
+  a chained 4-step sequence of edits mixing all of these against files with cross-file
+  dependents) is asserted to produce a `Graph::canonical_form()` byte-identical to a
+  from-scratch full rebuild of the same end state — incremental analysis is an
+  optimization, not a different analysis.
+- `scripts/check.ps1` (`cargo fmt --check`, `cargo clippy --workspace --all-targets`,
+  `cargo test --workspace`) passes: 228 tests total (29 `codeate-cli` integration, 187
+  `codeate-core` unit, 3 symbols end-to-end, 1 golden-file, 4 model invariant, 1 detect,
+  5 ingest).
+
 ## [Phase 12] — Developer CLI
 
 ### Added

@@ -213,7 +213,7 @@ Expose ingestion, analysis, and querying through the `codeate` binary from Phase
 ---
 
 ## Phase 13 — Incremental Analysis
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Incremental Analysis.*
 
@@ -230,7 +230,7 @@ Avoid full re-analysis on every change.
 ---
 
 ## Phase 14 — Repository-Level State
-**Status:** planned
+**Status:** in progress
 
 *Architecture stage: Repository State.*
 

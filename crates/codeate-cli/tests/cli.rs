@@ -547,3 +547,75 @@ fn query_definition_rejects_an_unknown_id() {
     assert!(!output.status.success());
     assert_eq!(output.status.code(), Some(1));
 }
+
+/// End-to-end coverage of the full pipeline (task 11): a fixture repository
+/// exercising every edge kind the query commands read, taken through
+/// `analyze` once and then every `query` subcommand in both human and
+/// `--json` mode. The per-command tests above already pin down each
+/// command's specific behavior; this one guards the seam between them --
+/// that a single `analyze` run produces a store every subcommand can read,
+/// in both output modes, without re-deriving expectations for each.
+#[test]
+fn full_pipeline_end_to_end_covers_every_query_kind_in_both_modes() {
+    let repo = TempRepo::new(&[
+        (
+            "src/main.rs",
+            "fn main() { crate::shapes::run(); }\nmod shapes;",
+        ),
+        (
+            "src/shapes.rs",
+            "pub trait Shape { fn area(&self) -> f64; }\n\
+             pub struct Circle;\n\
+             impl Shape for Circle { fn area(&self) -> f64 { helper() } }\n\
+             fn helper() -> f64 { 0.0 }\n\
+             pub fn run() { helper(); }",
+        ),
+    ]);
+    let store = analyze(&repo);
+
+    let shape_id = symbol_id(&store, "Shape");
+    let helper_id = symbol_id(&store, "helper");
+    let run_id = symbol_id(&store, "run");
+
+    let cases: &[&[&str]] = &[
+        &["symbol", "Shape"],
+        &["definition", "--id", &shape_id],
+        &["callers", "--id", &helper_id],
+        &["callees", "--id", &run_id],
+        &["dependencies", "--id", &run_id],
+        &["dependents", "--id", &helper_id],
+        &["implementers", "--id", &shape_id],
+        &["references", "--id", &helper_id],
+        &["impact", "--id", &helper_id],
+        &["entry-points"],
+        &["module-tree"],
+    ];
+
+    for case in cases {
+        for json_flag in [false, true] {
+            let mut command = codeate();
+            command.arg("query").args(*case).arg("--store").arg(&store);
+            if json_flag {
+                command.arg("--json");
+            }
+            let output = command.output().expect("run codeate query");
+            assert!(
+                output.status.success(),
+                "case {:?} (json={}) failed: {}",
+                case,
+                json_flag,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if json_flag {
+                let _: serde_json::Value = serde_json::from_slice(&output.stdout)
+                    .unwrap_or_else(|err| panic!("case {:?} produced invalid json: {err}", case));
+            } else {
+                assert!(
+                    !output.stdout.is_empty(),
+                    "case {:?} produced no human-readable output",
+                    case
+                );
+            }
+        }
+    }
+}

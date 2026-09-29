@@ -269,6 +269,38 @@ fn extract_struct_fields(
     (symbols, edges)
 }
 
+/// Extract `sig`'s parameter and return types, `ACCEPTS`/`RETURNS`-edged
+/// from `fn_symbol` (the function/method's own `SymbolKind::Function`/
+/// `Method` symbol). A signature with no declared return type binds
+/// `RETURNS` to the unit type `()`.
+fn extract_signature_types(
+    sig: &syn::Signature,
+    fn_symbol: &SymbolEntity,
+    generics: &HashSet<String>,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    for input in &sig.inputs {
+        if let syn::FnArg::Typed(typed) = input {
+            let type_ref = extract_type(&typed.ty, generics);
+            let type_symbol = type_symbol_for(&type_ref);
+            edges.push(Edge::new(fn_symbol.id.clone(), type_symbol.id.clone(), EdgeKind::Accepts));
+            symbols.push(type_symbol);
+        }
+    }
+
+    let return_type = match &sig.output {
+        syn::ReturnType::Default => TypeRef::Primitive("()".to_string()),
+        syn::ReturnType::Type(_, ty) => extract_type(ty, generics),
+    };
+    let return_symbol = type_symbol_for(&return_type);
+    edges.push(Edge::new(fn_symbol.id.clone(), return_symbol.id.clone(), EdgeKind::Returns));
+    symbols.push(return_symbol);
+
+    (symbols, edges)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,6 +540,58 @@ mod tests {
 
         assert!(edges.contains(&Edge::new(x_field.id.clone(), i32_type.id.clone(), EdgeKind::DependsOn)));
         assert!(symbols.iter().any(|s| s.id == i32_type.id));
+    }
+
+    fn parse_fn(source: &str) -> (syn::Signature, SymbolEntity) {
+        let file: syn::File = syn::parse_str(source).expect("valid Rust source");
+        let item_fn = file
+            .items
+            .into_iter()
+            .find_map(|item| match item {
+                syn::Item::Fn(f) => Some(f),
+                _ => None,
+            })
+            .expect("source has a fn");
+        let syntax_entity = SyntaxEntity::new(SyntaxKind::Function, "src/lib.rs", item_fn.sig.ident.to_string());
+        let fn_symbol =
+            SymbolEntity::new(SymbolKind::Function, syntax_entity.id.as_str(), &syntax_entity.name);
+        (item_fn.sig, fn_symbol)
+    }
+
+    #[test]
+    fn binds_each_parameter_type_via_accepts() {
+        let (sig, fn_symbol) = parse_fn("fn add(a: i32, b: i32) -> i32 { a + b }");
+
+        let (symbols, edges) = extract_signature_types(&sig, &fn_symbol, &HashSet::new());
+
+        let i32_type = type_symbol_for(&TypeRef::Primitive("i32".to_string()));
+        let accepts_count = edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Accepts && e.from == fn_symbol.id && e.to == i32_type.id)
+            .count();
+        // Both `a` and `b` are i32, so the same type symbol is ACCEPTS-edged twice.
+        assert_eq!(accepts_count, 2);
+        assert!(symbols.iter().any(|s| s.id == i32_type.id));
+    }
+
+    #[test]
+    fn binds_the_return_type_via_returns() {
+        let (sig, fn_symbol) = parse_fn("fn make() -> Point { Point }");
+
+        let (_symbols, edges) = extract_signature_types(&sig, &fn_symbol, &HashSet::new());
+
+        let point_type = type_symbol_for(&TypeRef::Named { name: "Point".to_string(), type_args: vec![] });
+        assert!(edges.contains(&Edge::new(fn_symbol.id.clone(), point_type.id.clone(), EdgeKind::Returns)));
+    }
+
+    #[test]
+    fn a_signature_with_no_return_type_binds_returns_to_unit() {
+        let (sig, fn_symbol) = parse_fn("fn run() {}");
+
+        let (_symbols, edges) = extract_signature_types(&sig, &fn_symbol, &HashSet::new());
+
+        let unit_type = type_symbol_for(&TypeRef::Primitive("()".to_string()));
+        assert!(edges.contains(&Edge::new(fn_symbol.id.clone(), unit_type.id.clone(), EdgeKind::Returns)));
     }
 
     #[test]

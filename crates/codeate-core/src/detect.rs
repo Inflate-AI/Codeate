@@ -62,6 +62,15 @@ pub fn detect_by_content(bytes: &[u8], registry: &LanguageRegistry) -> Option<La
     registry.by_shebang_interpreter(interpreter).cloned()
 }
 
+/// Detect the language of a file: extension first, shebang content as a
+/// fallback, and `LanguageId::Unknown` when neither resolves — detection
+/// never drops a file silently.
+pub fn detect(path: &Path, bytes: &[u8], registry: &LanguageRegistry) -> LanguageId {
+    detect_by_extension(path, registry)
+        .or_else(|| detect_by_content(bytes, registry))
+        .unwrap_or(LanguageId::Unknown)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +140,38 @@ mod tests {
         let registry = default_registry();
         let content = b"#!/bin/bash\necho hi\n";
         assert_eq!(detect_by_content(content, &registry), None);
+    }
+
+    #[test]
+    fn detect_prefers_extension_over_content() {
+        let registry = default_registry();
+        // A .py file with no shebang: extension alone should be enough.
+        let result = detect(Path::new("script.py"), b"print('hi')\n", &registry);
+        assert_eq!(result, LanguageId::known("python"));
+    }
+
+    #[test]
+    fn detect_falls_back_to_shebang_when_extensionless() {
+        let registry = default_registry();
+        let result = detect(
+            Path::new("run"),
+            b"#!/usr/bin/env node\nconsole.log('hi')\n",
+            &registry,
+        );
+        assert_eq!(result, LanguageId::known("javascript"));
+    }
+
+    #[test]
+    fn detect_returns_unknown_when_nothing_matches() {
+        let registry = default_registry();
+        let result = detect(Path::new("archive.zip"), b"binary junk", &registry);
+        assert_eq!(result, LanguageId::Unknown);
+    }
+
+    #[test]
+    fn detect_returns_unknown_for_extensionless_unrecognized_content() {
+        let registry = default_registry();
+        let result = detect(Path::new("LICENSE"), b"MIT License\n", &registry);
+        assert_eq!(result, LanguageId::Unknown);
     }
 }

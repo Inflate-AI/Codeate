@@ -7,7 +7,7 @@ pub mod language;
 pub mod repository;
 
 pub use config::Config;
-pub use detect::{default_registry, detect_by_content, detect_by_extension};
+pub use detect::{default_registry, detect, detect_by_content, detect_by_extension};
 pub use error::{Error, Result};
 pub use hash::hash_bytes;
 pub use ingest::ingest;

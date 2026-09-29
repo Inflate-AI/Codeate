@@ -267,7 +267,10 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
             Ok(())
         }
         QueryKind::Implementers { id } => {
-            Err(format!("query implementers --id {id}: not yet implemented"))
+            let id = parse_id(&id)?;
+            require_symbol(&engine, &id)?;
+            print_symbol_list(&engine.implementers_of(&id), "no implementers", json);
+            Ok(())
         }
         QueryKind::References { id } => {
             Err(format!("query references --id {id}: not yet implemented"))

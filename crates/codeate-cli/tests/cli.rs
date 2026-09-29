@@ -340,6 +340,46 @@ fn query_dependencies_and_dependents_follow_a_cross_file_import() {
 }
 
 #[test]
+fn query_implementers_finds_a_trait_implementer() {
+    let repo = TempRepo::new(&[(
+        "src/lib.rs",
+        "pub trait Shape { fn area(&self) -> f64; }\npub struct Circle;\nimpl Shape for Circle { fn area(&self) -> f64 { 0.0 } }",
+    )]);
+    let store = analyze(&repo);
+    let shape_id = symbol_id(&store, "Shape");
+
+    let output = codeate()
+        .args(["query", "implementers", "--id", &shape_id, "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query implementers");
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert!(value
+        .as_array()
+        .expect("json array")
+        .iter()
+        .any(|v| v["name"] == "Circle"));
+}
+
+#[test]
+fn query_implementers_rejects_an_unknown_id() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "implementers", "--id", "not-a-real-id", "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query implementers");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
 fn query_dependencies_rejects_an_unknown_id() {
     let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
     let store = analyze(&repo);

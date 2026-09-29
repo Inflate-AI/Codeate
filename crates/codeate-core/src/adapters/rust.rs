@@ -446,6 +446,151 @@ fn resolve_references(
     (symbols, edges)
 }
 
+enum CallSite<'a> {
+    Free(&'a syn::ExprCall),
+    Method(&'a syn::ExprMethodCall),
+}
+
+/// Like `walk_expr`, but surfaces `syn::Expr::Call`/`MethodCall` nodes
+/// (still recursing into their receiver/args to find nested calls), rather
+/// than `syn::Expr::Path` leaves. Same deliberate non-exhaustive scope as
+/// `walk_expr`.
+fn walk_calls<'a>(expr: &'a syn::Expr, on_call: &mut impl FnMut(CallSite<'a>)) {
+    match expr {
+        syn::Expr::Call(c) => {
+            on_call(CallSite::Free(c));
+            for arg in &c.args {
+                walk_calls(arg, on_call);
+            }
+        }
+        syn::Expr::MethodCall(m) => {
+            on_call(CallSite::Method(m));
+            walk_calls(&m.receiver, on_call);
+            for arg in &m.args {
+                walk_calls(arg, on_call);
+            }
+        }
+        syn::Expr::Binary(b) => {
+            walk_calls(&b.left, on_call);
+            walk_calls(&b.right, on_call);
+        }
+        syn::Expr::Unary(u) => walk_calls(&u.expr, on_call),
+        syn::Expr::Paren(p) => walk_calls(&p.expr, on_call),
+        syn::Expr::Group(g) => walk_calls(&g.expr, on_call),
+        syn::Expr::Field(f) => walk_calls(&f.base, on_call),
+        syn::Expr::Reference(r) => walk_calls(&r.expr, on_call),
+        syn::Expr::Return(r) => {
+            if let Some(inner) = &r.expr {
+                walk_calls(inner, on_call);
+            }
+        }
+        syn::Expr::Assign(a) => {
+            walk_calls(&a.left, on_call);
+            walk_calls(&a.right, on_call);
+        }
+        syn::Expr::If(i) => {
+            walk_calls(&i.cond, on_call);
+            for stmt in &i.then_branch.stmts {
+                walk_calls_stmt(stmt, on_call);
+            }
+            if let Some((_, else_expr)) = &i.else_branch {
+                walk_calls(else_expr, on_call);
+            }
+        }
+        syn::Expr::Block(b) => {
+            for stmt in &b.block.stmts {
+                walk_calls_stmt(stmt, on_call);
+            }
+        }
+        syn::Expr::Struct(s) => {
+            for field in &s.fields {
+                walk_calls(&field.expr, on_call);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_calls_stmt<'a>(stmt: &'a syn::Stmt, on_call: &mut impl FnMut(CallSite<'a>)) {
+    match stmt {
+        syn::Stmt::Local(local) => {
+            if let Some(init) = &local.init {
+                walk_calls(&init.expr, on_call);
+            }
+        }
+        syn::Stmt::Expr(expr, _) => walk_calls(expr, on_call),
+        syn::Stmt::Item(_) | syn::Stmt::Macro(_) => {}
+    }
+}
+
+/// Resolve call sites in `block` to callee symbols, emitting `CALLS` edges
+/// from `fn_symbol`. Free-function calls (`foo(..)`) resolve via
+/// `scope_tree`; a multi-segment callee path (`std::process::exit(..)`)
+/// gets an explicit `"external-path"` placeholder. Method calls
+/// (`x.foo(..)`) resolve by best-effort name match against any `Method`
+/// symbol in `symbol_table` -- real receiver-type dispatch is out of scope
+/// for this phase (see Phase 8's `OVERRIDES`/`IMPLEMENTS`); an unmatched
+/// method name gets an explicit `"unknown-method"` placeholder.
+fn resolve_calls(
+    block: &syn::Block,
+    fn_symbol: &SymbolEntity,
+    scope_tree: &ScopeTree,
+    scope: usize,
+    symbol_table: &SymbolTable,
+) -> (Vec<SymbolEntity>, Vec<Edge>) {
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+
+    for stmt in &block.stmts {
+        walk_calls_stmt(stmt, &mut |call: CallSite| match call {
+            CallSite::Free(call_expr) => {
+                let syn::Expr::Path(path) = call_expr.func.as_ref() else {
+                    let raw = quote::quote!(#call_expr).to_string();
+                    let placeholder = unresolved_symbol("unsupported-form", &raw);
+                    symbols.push(placeholder.clone());
+                    edges.push(Edge::new(fn_symbol.id.clone(), placeholder.id.clone(), EdgeKind::Calls));
+                    return;
+                };
+
+                if path.path.segments.len() != 1 {
+                    let raw = quote::quote!(#path).to_string();
+                    let placeholder = unresolved_symbol("external-path", &raw);
+                    symbols.push(placeholder.clone());
+                    edges.push(Edge::new(fn_symbol.id.clone(), placeholder.id.clone(), EdgeKind::Calls));
+                    return;
+                }
+
+                let name = path.path.segments[0].ident.to_string();
+                let resolved = scope_tree
+                    .lookup(scope, &name)
+                    .and_then(|syntax_id| symbol_table.find_by_syntax_id(syntax_id))
+                    .cloned();
+                let target = resolved.unwrap_or_else(|| {
+                    let placeholder = unresolved_symbol("unknown-local", &name);
+                    symbols.push(placeholder.clone());
+                    placeholder
+                });
+                edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::Calls));
+            }
+            CallSite::Method(method_call) => {
+                let name = method_call.method.to_string();
+                let matched = symbol_table
+                    .symbols()
+                    .find(|s| s.kind == SymbolKind::Method && s.name == name)
+                    .cloned();
+                let target = matched.unwrap_or_else(|| {
+                    let placeholder = unresolved_symbol("unknown-method", &name);
+                    symbols.push(placeholder.clone());
+                    placeholder
+                });
+                edges.push(Edge::new(fn_symbol.id.clone(), target.id.clone(), EdgeKind::Calls));
+            }
+        });
+    }
+
+    (symbols, edges)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,6 +979,87 @@ mod tests {
             run_symbol.id.clone(),
             placeholder.id.clone(),
             EdgeKind::References
+        )));
+    }
+
+    #[test]
+    fn resolves_a_free_function_call() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "fn helper() {} fn run() { helper() }";
+        let (entities, edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+        let helper_syntax = find(&entities, SyntaxKind::Function, "helper");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let helper_symbol = symbol_table.find_by_syntax_id(&helper_syntax.id).unwrap().clone();
+
+        let block = parse_fn_block("fn run() { helper() }");
+        let (_symbols, call_edges) =
+            resolve_calls(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        assert!(call_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            helper_symbol.id.clone(),
+            EdgeKind::Calls
+        )));
+    }
+
+    #[test]
+    fn resolves_a_method_call_by_best_effort_name_match() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "struct Counter; impl Counter { fn increment(&mut self) {} } fn run(c: Counter) {}";
+        let (entities, edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+        let increment_syntax = find(&entities, SyntaxKind::Method, "increment");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+        let increment_symbol = symbol_table.find_by_syntax_id(&increment_syntax.id).unwrap().clone();
+
+        let block = parse_fn_block("fn run(mut c: Counter) { c.increment() }");
+        let (_symbols, call_edges) =
+            resolve_calls(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        assert!(call_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            increment_symbol.id.clone(),
+            EdgeKind::Calls
+        )));
+    }
+
+    #[test]
+    fn a_call_to_an_external_path_gets_an_explicit_placeholder() {
+        use crate::symbols::build_symbol_table;
+
+        let source = "fn run() {}";
+        let (entities, edges) = extract(source);
+        let module = find(&entities, SyntaxKind::Module, "src/lib.rs");
+        let run_syntax = find(&entities, SyntaxKind::Function, "run");
+
+        let scope_tree = ScopeTree::build(module, &entities, &edges);
+        let symbol_table = build_symbol_table(&entities);
+        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap().clone();
+
+        let block = parse_fn_block("fn run() { std::process::exit(1) }");
+        let (symbols, call_edges) =
+            resolve_calls(&block, &run_symbol, &scope_tree, run_scope, &symbol_table);
+
+        let placeholder = symbols.first().expect("an unresolved placeholder was created");
+        assert!(placeholder.name.starts_with("external-path:"));
+        assert!(call_edges.contains(&Edge::new(
+            run_symbol.id.clone(),
+            placeholder.id.clone(),
+            EdgeKind::Calls
         )));
     }
 

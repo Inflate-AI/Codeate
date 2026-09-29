@@ -7,6 +7,48 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 3] — Canonical Code Model
+
+### Added
+
+- `EntityId` (`model/id.rs`): a deterministic, language-independent identifier derived
+  from an entity's kind + declaring location + name (+ optional disambiguator) via the
+  Phase 1 `hash_bytes` primitive — the same logical entity always resolves to the same
+  ID, on any run — built TDD, 6 unit tests.
+- Closed `SyntaxKind`/`SyntaxEntity` (`model/syntax.rs`): the 12 README syntax kinds
+  (`Module`, `Package`, `Class`, `Interface`, `Struct`, `Enum`, `Function`, `Method`,
+  `Variable`, `Parameter`, `Statement`, `Expression`) as a genuinely closed enum, with no
+  catch-all variant — enforced via an exhaustive-match test that fails to compile if a
+  variant goes unhandled — built TDD, 4 unit tests.
+- Closed `SymbolKind`/`SymbolEntity` (`model/symbol.rs`): the 8 README symbol kinds
+  (`Symbol`, `Type`, `Field`, `Method`, `Function`, `Constant`, `Namespace`, `Generic`),
+  same closed-enum discipline — built TDD, 4 unit tests.
+- Closed `EdgeKind`/`Edge` (`model/edge.rs`): all 14 README relationship types
+  (`CONTAINS`, `IMPORTS`, `EXPORTS`, `DECLARES`, `REFERENCES`, `CALLS`, `EXTENDS`,
+  `IMPLEMENTS`, `OVERRIDES`, `INSTANTIATES`, `RETURNS`, `ACCEPTS`, `DEPENDS_ON`,
+  `DEFINED_IN`), with a stable SCREAMING_SNAKE_CASE string form (`as_str()`/`parse()`)
+  for later persistence (Phase 10) — built TDD, 5 unit tests including full round-trip
+  coverage of all 14 kinds.
+- Cross-cutting model invariant tests (`tests/model.rs`, 4 integration tests): ID
+  stability across independent construction; every edge kind round-trips through its
+  string form; a syntax node can be explicitly linked to its symbol via a `DefinedIn`
+  edge despite having a distinct ID.
+
+### Fixed
+
+- `SyntaxKind::Function` and `SymbolKind::Function` (and other same-named kind pairs)
+  both stringified to `"Function"`, which would have collided their `EntityId`s for a
+  same-named function — caught while writing the cross-cutting invariant tests. Fixed by
+  namespacing ID generation with a `"syntax::"`/`"symbol::"` domain prefix so syntax and
+  symbol entities never collide on identity.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (68 tests total: 57 `codeate-core` unit, 4 model
+  invariant integration, 1 detect integration, 5 ingest integration, 3 CLI integration)
+  via `scripts/check.ps1`.
+
 ## [Phase 2] — Language Detection
 
 ### Added

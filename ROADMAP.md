@@ -52,7 +52,7 @@ Classify each ingested file by language, independent of any parser.
 ---
 
 ## Phase 3 — Canonical Code Model
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Canonical Model (defined early so every later stage targets a
 stable schema instead of language-specific ASTs).*

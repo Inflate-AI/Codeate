@@ -108,6 +108,14 @@ impl Graph {
         self.nodes.len()
     }
 
+    pub fn node_ids(&self) -> impl Iterator<Item = &EntityId> {
+        self.nodes.keys()
+    }
+
+    pub fn all_edges(&self) -> impl Iterator<Item = &Edge> {
+        self.outgoing.values().flatten()
+    }
+
     pub fn outgoing(&self, id: &EntityId) -> &[Edge] {
         self.outgoing.get(id).map(Vec::as_slice).unwrap_or(&[])
     }

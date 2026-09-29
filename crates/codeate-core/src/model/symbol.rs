@@ -4,7 +4,7 @@ use crate::model::id::EntityId;
 /// recognizes. Symbols are resolved names with identity and scope (Phase 5+)
 /// — distinct from `SyntaxKind`, which describes AST shape. There is no
 /// catch-all "other" variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SymbolKind {
     Symbol,
     Type,
@@ -34,7 +34,7 @@ impl SymbolKind {
 /// A language-agnostic resolved symbol: a stable identity, its kind, and its
 /// name. Symbol resolution (Phase 5+) produces these; no resolver targets
 /// this model yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SymbolEntity {
     pub id: EntityId,
     pub kind: SymbolKind,

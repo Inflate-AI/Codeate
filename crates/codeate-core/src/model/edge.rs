@@ -3,7 +3,7 @@ use crate::model::id::EntityId;
 /// The closed set of relationship edge types the canonical model recognizes,
 /// per the README's graph schema. No catch-all "other" variant — every
 /// relationship a later phase produces must be one of these 14 kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum EdgeKind {
     Contains,
     Imports,
@@ -68,7 +68,7 @@ impl EdgeKind {
 }
 
 /// A directed relationship between two canonical-model entities.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Edge {
     pub from: EntityId,
     pub to: EntityId,

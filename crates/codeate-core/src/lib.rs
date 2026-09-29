@@ -11,6 +11,7 @@ pub mod model;
 pub mod pipeline;
 pub mod repository;
 pub mod resolve;
+pub mod store;
 pub mod symbols;
 pub mod types;
 
@@ -29,6 +30,7 @@ pub use model::{Edge, EdgeKind, EntityId, SymbolEntity, SymbolKind, SyntaxEntity
 pub use pipeline::{analyze_repository, AnalysisResult};
 pub use repository::{File, Repository};
 pub use resolve::{resolve_depends_on, unresolved_symbol};
+pub use store::{export_graphml, StoredGraph, CURRENT_VERSION};
 pub use symbols::{
     build_symbol_table, defined_in_edges, merge_symbol_tables, ScopeTree, SymbolTable,
     SymbolTableEntry,

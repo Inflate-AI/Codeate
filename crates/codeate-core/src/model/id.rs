@@ -6,7 +6,7 @@ use crate::hash::hash_bytes;
 /// name (plus an optional disambiguator for overloads/duplicates) — the same
 /// logical entity always produces the same `EntityId`, on any run, on any
 /// platform.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct EntityId(String);
 
 impl EntityId {

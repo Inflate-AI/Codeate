@@ -4,7 +4,7 @@ use crate::model::id::EntityId;
 /// recognizes. Every language adapter maps its AST onto exactly these
 /// kinds — there is no catch-all "other" variant, so an unmapped
 /// construct is a model gap to fix here, not something to smuggle through.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SyntaxKind {
     Module,
     Package,
@@ -42,7 +42,7 @@ impl SyntaxKind {
 /// A language-agnostic syntax node: a stable identity, its kind, and its
 /// declared name. Language adapters (Phase 4+) produce these; no adapter
 /// targets this model yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SyntaxEntity {
     pub id: EntityId,
     pub kind: SyntaxKind,

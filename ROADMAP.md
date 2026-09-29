@@ -91,7 +91,7 @@ the Phase 3 canonical syntax entities.
 ---
 
 ## Phase 5 — Symbol Resolution
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Symbol & Type Resolution (symbols).*
 

@@ -7,6 +7,47 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 5] — Symbol Resolution
+
+### Added
+
+- Scope model (`symbols/scope.rs`): `ScopeTree` built from a `SyntaxEntity`/`Edge`
+  `CONTAINS` tree -- `Module`/`Function`/`Method` each open a scope; other declarations
+  bind names into their immediately enclosing scope. `lookup()` walks up through parent
+  scopes so an inner binding shadows an outer same-named one -- built TDD, 3 unit tests.
+- Per-file symbol table (`symbols/table.rs`): `build_symbol_table()` maps each
+  `SyntaxKind` to its `SymbolKind` (`Module`/`Package`→`Namespace`,
+  `Class`/`Struct`/`Enum`/`Interface`→`Type`, `Function`→`Function`, `Method`→`Method`,
+  `Variable`/`Parameter`→generic `Symbol`, since Phase 3's closed enum has no dedicated
+  variable kind; `Statement`/`Expression` resolve to no symbol). Each symbol's ID is
+  derived from its originating syntax entity's own ID -- built TDD, 4 unit tests.
+- `DEFINED_IN` edges (`symbols/defined_in.rs`): `defined_in_edges()` follows each
+  symbol's originating `DECLARES` edge back to its declaring module -- built TDD, 3 unit
+  tests.
+- Repository-scope merge: `merge_symbol_tables()` combines per-file tables into one,
+  symbols never collide across files since ids are derived per-file, per-scope -- built
+  TDD, 2 unit tests.
+- Deterministic shadowing/redeclaration policy, exercised end-to-end in a new
+  `tests/symbols.rs` (adapter → scope tree → symbol table → `DEFINED_IN`, 3 integration
+  tests): an inner scope's binding shadows an outer same-named one on lookup while the
+  outer symbol stays independently resolvable; a name redeclared in the *same* scope
+  resolves to the most recently declared binding.
+
+### Fixed
+
+- `let x = 1; let x = 2;` in the same function produced two `Variable` syntax entities
+  with an identical `EntityId` (same kind + scope + name collided) -- caught while
+  writing the redeclaration tests. Fixed by folding the statement index into the id's
+  location string in the Rust adapter's body extraction, so same-scope redeclarations
+  get distinct, deterministic ids.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (101 tests total: 84 `codeate-core` unit, 3 symbols
+  end-to-end, 1 golden-file, 4 model invariant, 1 detect, 5 ingest, 3 CLI) via
+  `scripts/check.ps1`.
+
 ## [Phase 4] — First Language Adapter: Parsing & AST Extraction
 
 ### Added

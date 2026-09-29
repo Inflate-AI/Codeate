@@ -13,5 +13,5 @@ pub use error::{Error, Result};
 pub use hash::hash_bytes;
 pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};
-pub use model::EntityId;
+pub use model::{EntityId, SyntaxEntity, SyntaxKind};
 pub use repository::{File, Repository};

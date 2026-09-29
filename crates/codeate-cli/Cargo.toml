@@ -1,0 +1,13 @@
+[package]
+name = "codeate-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "codeate"
+path = "src/main.rs"
+
+[dependencies]
+codeate-core = { path = "../codeate-core" }
+clap.workspace = true

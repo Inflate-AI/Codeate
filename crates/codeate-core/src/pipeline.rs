@@ -12,7 +12,7 @@ use crate::language::LanguageId;
 use crate::model::{Edge, EntityId, SymbolEntity, SyntaxEntity};
 use crate::repository::Repository;
 use crate::resolve::resolve_depends_on;
-use crate::symbols::{build_symbol_table, ScopeTree};
+use crate::symbols::{build_symbol_table, defined_in_edges, ScopeTree};
 
 /// The full canonical entity/edge stream for a repository: syntax entities,
 /// resolved symbols, and every edge kind Phases 3-8 produce, resolved with
@@ -84,6 +84,7 @@ pub fn analyze_repository(repository: &Repository) -> Result<AnalysisResult> {
             owner_file.insert(entry.symbol.id.clone(), file.clone());
         }
     }
+    all_edges.extend(defined_in_edges(&symbol_table, &all_edges));
 
     let mut module_symbol_for_file: HashMap<String, EntityId> = HashMap::new();
     for pf in &per_file {

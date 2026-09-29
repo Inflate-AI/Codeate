@@ -8,6 +8,7 @@ pub mod ingest;
 pub mod language;
 pub mod model;
 pub mod repository;
+pub mod symbols;
 
 pub use adapter::LanguageAdapter;
 pub use adapters::RustAdapter;
@@ -19,3 +20,4 @@ pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};
 pub use model::{Edge, EdgeKind, EntityId, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
 pub use repository::{File, Repository};
+pub use symbols::ScopeTree;

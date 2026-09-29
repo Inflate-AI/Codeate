@@ -114,6 +114,36 @@ fn analyze_persists_a_graph_and_prints_a_summary() {
 }
 
 #[test]
+fn query_reports_a_clear_error_when_the_store_is_missing() {
+    let output = codeate()
+        .args(["query", "entry-points", "--store"])
+        .arg("/definitely/not/a/real/store/codeate-test.json")
+        .output()
+        .expect("run codeate query");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("codeate-test.json"));
+    assert!(stderr.to_lowercase().contains("analyze"));
+}
+
+#[test]
+fn query_reports_a_clear_error_when_the_store_is_not_valid_json() {
+    let repo = TempRepo::new(&[("graph.json", "not json at all")]);
+    let store_path = repo.root.join("graph.json");
+
+    let output = codeate()
+        .args(["query", "entry-points", "--store"])
+        .arg(&store_path)
+        .output()
+        .expect("run codeate query");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
 fn analyze_rejects_a_nonexistent_path() {
     let output = codeate()
         .arg("analyze")

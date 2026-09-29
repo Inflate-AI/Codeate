@@ -70,10 +70,7 @@ fn main() {
 
     let result = match cli.command {
         Command::Analyze(args) => run_analyze(args),
-        Command::Query(_args) => {
-            eprintln!("codeate query: not yet implemented");
-            std::process::exit(1);
-        }
+        Command::Query(args) => run_query(args),
     };
 
     if let Err(message) = result {
@@ -109,4 +106,45 @@ fn run_analyze(args: AnalyzeArgs) -> Result<(), String> {
     println!("graph written to {}", out_path.display());
 
     Ok(())
+}
+
+fn load_store(path: &std::path::Path) -> Result<codeate_core::StoredGraph, String> {
+    if !path.exists() {
+        return Err(format!(
+            "no graph found at {} -- run `codeate analyze` first",
+            path.display()
+        ));
+    }
+    codeate_core::store::load(path).map_err(|err| err.to_string())
+}
+
+fn run_query(args: QueryArgs) -> Result<(), String> {
+    let stored = load_store(&args.store)?;
+    let (graph, _integrity) = stored.into_graph();
+    let _engine = codeate_core::QueryEngine::new(&graph);
+    let _json = args.json;
+
+    match args.kind {
+        QueryKind::Symbol { name } => Err(format!("query symbol {name}: not yet implemented")),
+        QueryKind::Definition { id } => {
+            Err(format!("query definition --id {id}: not yet implemented"))
+        }
+        QueryKind::Callers { id } => Err(format!("query callers --id {id}: not yet implemented")),
+        QueryKind::Callees { id } => Err(format!("query callees --id {id}: not yet implemented")),
+        QueryKind::Dependencies { id } => {
+            Err(format!("query dependencies --id {id}: not yet implemented"))
+        }
+        QueryKind::Dependents { id } => {
+            Err(format!("query dependents --id {id}: not yet implemented"))
+        }
+        QueryKind::Implementers { id } => {
+            Err(format!("query implementers --id {id}: not yet implemented"))
+        }
+        QueryKind::References { id } => {
+            Err(format!("query references --id {id}: not yet implemented"))
+        }
+        QueryKind::Impact { id } => Err(format!("query impact --id {id}: not yet implemented")),
+        QueryKind::EntryPoints => Err("query entry-points: not yet implemented".to_string()),
+        QueryKind::ModuleTree => Err("query module-tree: not yet implemented".to_string()),
+    }
 }

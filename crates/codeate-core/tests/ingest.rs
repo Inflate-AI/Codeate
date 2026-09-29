@@ -57,3 +57,14 @@ fn ingest_of_a_missing_root_is_an_error() {
     let result = codeate_core::ingest(fixture("does_not_exist"));
     assert!(result.is_err());
 }
+
+#[test]
+fn ingesting_the_same_repository_twice_produces_identical_results() {
+    let root = fixture("basic_repo");
+
+    let first = codeate_core::ingest(&root).expect("first ingest");
+    let second = codeate_core::ingest(&root).expect("second ingest");
+
+    assert_eq!(first, second, "two ingestion runs over the same repo diverged");
+    assert!(!first.files.is_empty(), "fixture repo unexpectedly empty");
+}

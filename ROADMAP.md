@@ -72,7 +72,7 @@ Define the language-agnostic data model all adapters produce and all consumers r
 ---
 
 ## Phase 4 — First Language Adapter: Parsing & AST Extraction
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Language Adapters → AST / Syntax Data.*
 

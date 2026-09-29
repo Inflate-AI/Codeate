@@ -7,6 +7,39 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 4] — First Language Adapter: Parsing & AST Extraction
+
+### Added
+
+- `LanguageAdapter` trait (`adapter.rs`): `parse`/`extract` plus default-empty stub methods
+  for later resolver stages (`resolve_symbols`, `resolve_references`), so the trait shape
+  won't need to change again as Phases 5-8 land — built TDD, 2 unit tests against a
+  minimal no-op test adapter.
+- `RustAdapter` parser (`adapters/rust.rs`): `parse()` via `syn::parse_file`, converting
+  syntax errors into a `codeate_core::Error` rather than panicking — built TDD, 2 unit
+  tests (valid source, clear error on invalid syntax).
+- Declaration extraction: `extract()` walks a parsed `syn::File` and produces canonical
+  entities for modules (file-level + nested `mod`), structs, enums, traits (mapped to
+  `Interface`), top-level functions, and `impl` block methods with their parameters
+  (`self` excluded), plus `CONTAINS`/`DECLARES` edges from each module to its
+  declarations. Entity IDs are scoped by a `module::item` path string so same-named items
+  in different modules never collide — built TDD, 7 unit tests.
+- Body extraction: extended to walk function/method bodies — `let` bindings become
+  `Variable` entities, semicolon-terminated statements become `Statement` entities, and a
+  tail expression becomes an `Expression` entity, linked to their function/method via
+  `CONTAINS` only (not `DECLARES`) — built TDD, 3 unit tests.
+- Golden-file test (`tests/rust_adapter.rs` + `tests/fixtures/rust_adapter/sample.rs`): one
+  fixture exercising every extraction rule together (2 modules, 2 structs, an enum, a
+  trait, a function, a method, 3 parameters, 2 variables, a statement, and 2 tail
+  expressions), asserting both per-kind counts and specific `CONTAINS`/`DECLARES` edges.
+- New dependency: `syn` (with `full`, `parsing`, `printing`, `extra-traits` features).
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (94 tests total: 80 `codeate-core` unit, 1 golden-file
+  integration, 4 model invariant, 1 detect, 5 ingest, 3 CLI) via `scripts/check.ps1`.
+
 ## [Phase 3] — Canonical Code Model
 
 ### Added

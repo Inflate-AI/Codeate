@@ -7,6 +7,42 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 12] — Developer CLI
+
+### Added
+
+- `codeate analyze <path> [--out <path>]`: runs the full ingest -> detect-languages ->
+  analyze_repository pipeline and persists the resulting `StoredGraph` to
+  `<path>/.codeate/graph.json` by default, creating the directory as needed. Prints a
+  one-line summary (file / syntax entity / symbol / edge counts) and the output path.
+- `codeate query <kind> [--id <id>] [--store <path>] [--json]`: the full Phase 11 query
+  surface, dispatched from a `StoredGraph` loaded from `--store` (default
+  `./.codeate/graph.json`):
+  - `symbol <name>` / `definition --id` -- symbol and definition lookup.
+  - `callers --id` / `callees --id` -- call graph queries.
+  - `dependencies --id` / `dependents --id` -- transitive `DEPENDS_ON`/`IMPORTS` closure.
+  - `implementers --id` -- implementation lookup.
+  - `references --id` -- reference lookup.
+  - `impact --id` -- transitive impact analysis.
+  - `entry-points` / `module-tree` -- repository exploration.
+  - `--id`-targeted commands take an opaque `EntityId` (never a bare name, since
+    same-named symbols in different files are legitimately distinct) obtained from
+    `query symbol`; an unknown id is a hard error, distinct from a legitimately empty
+    result (e.g. a symbol with no callers).
+- Exit code convention: `0` for success, including empty-but-valid query results; `1`
+  for runtime errors (bad path, missing/corrupt store, unknown id); `2` for usage
+  errors (clap's default for bad args or a missing subcommand).
+- 22 new `codeate-cli` integration tests (25 total, up from 3), including one
+  end-to-end test running a single `analyze` through every `query` subcommand in both
+  human-readable and `--json` output modes.
+
+### Verified
+
+- `scripts/check.ps1` (`cargo fmt --check`, `cargo clippy --workspace --all-targets`,
+  `cargo test --workspace`) passes: 208 tests total (25 `codeate-cli` integration, 169
+  `codeate-core` unit, 3 symbols end-to-end, 1 golden-file, 4 model invariant, 1 detect,
+  5 ingest).
+
 ## [Phase 11] — Query Engine
 
 ### Added

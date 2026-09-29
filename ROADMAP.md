@@ -199,7 +199,7 @@ Implement the deterministic query surface described in the README.
 ---
 
 ## Phase 12 — Developer CLI
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Query / API / CLI (CLI surface).*
 

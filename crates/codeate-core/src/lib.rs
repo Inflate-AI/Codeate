@@ -7,6 +7,7 @@ pub mod hash;
 pub mod ingest;
 pub mod language;
 pub mod model;
+pub mod pipeline;
 pub mod repository;
 pub mod resolve;
 pub mod symbols;
@@ -23,6 +24,7 @@ pub use hash::hash_bytes;
 pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};
 pub use model::{Edge, EdgeKind, EntityId, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
+pub use pipeline::{analyze_repository, AnalysisResult};
 pub use repository::{File, Repository};
 pub use resolve::{resolve_depends_on, unresolved_symbol};
 pub use symbols::{

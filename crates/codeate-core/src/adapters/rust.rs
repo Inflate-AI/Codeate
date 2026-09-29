@@ -7,12 +7,6 @@ use crate::resolve::unresolved_symbol;
 use crate::symbols::{ScopeTree, SymbolTable};
 use crate::types::{type_symbol_for, TypeRef};
 
-// Phase 6 type/field/signature/generic extraction: a complete, unit-tested
-// building-block library not yet wired into `extract()`'s own traversal or
-// exposed through `LanguageAdapter::resolve_symbols` -- Phase 9's repository
-// pipeline is the intended integration point (see TASKS.md). Kept and tested
-// as-is rather than deleted or force-wired prematurely.
-#[allow(dead_code)]
 const PRIMITIVE_TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
     "f64", "bool", "char", "str", "String",
@@ -31,22 +25,53 @@ impl LanguageAdapter for RustAdapter {
     }
 
     fn extract(&self, ast: &Self::Ast, location: &str) -> (Vec<SyntaxEntity>, Vec<Edge>) {
-        let mut entities = Vec::new();
-        let mut edges = Vec::new();
-
-        let file_module = SyntaxEntity::new(SyntaxKind::Module, location, location);
-        entities.push(file_module.clone());
-
-        extract_items(
-            &ast.items,
-            &file_module,
-            location,
-            &mut entities,
-            &mut edges,
-        );
-
-        (entities, edges)
+        let mut sites = ResolutionSites::default();
+        extract_with_sites(ast, location, &mut sites)
     }
+}
+
+/// Sites `extract_items` visits that later resolution stages need the raw
+/// `syn` AST for (a `syn::Block`, `syn::ItemImpl`, ...) but that don't have a
+/// place in the plain `(Vec<SyntaxEntity>, Vec<Edge>)` the `extract` trait
+/// method returns. Collected during `extract_items`'s single walk so a
+/// resolution-stage caller (Phase 9's repository pipeline) never needs a
+/// second, separately-written traversal that could drift out of sync with
+/// what `extract_items` actually declared.
+#[derive(Default)]
+pub(crate) struct ResolutionSites<'a> {
+    /// A function/method's own entity, its body block, and its scope string.
+    pub(crate) bodies: Vec<(SyntaxEntity, &'a syn::Block, String)>,
+    /// Every `impl` block, for `resolve_implements`.
+    pub(crate) impls: Vec<&'a syn::ItemImpl>,
+    /// An impl method's own entity paired with the name of the trait it
+    /// implements (only present for `impl Trait for Type` methods), for
+    /// `resolve_overrides`.
+    pub(crate) trait_impl_methods: Vec<(SyntaxEntity, String)>,
+    /// Every `trait`, for `resolve_supertraits`.
+    pub(crate) traits: Vec<&'a syn::ItemTrait>,
+}
+
+pub(crate) fn extract_with_sites<'a>(
+    ast: &'a syn::File,
+    location: &str,
+    sites: &mut ResolutionSites<'a>,
+) -> (Vec<SyntaxEntity>, Vec<Edge>) {
+    let mut entities = Vec::new();
+    let mut edges = Vec::new();
+
+    let file_module = SyntaxEntity::new(SyntaxKind::Module, location, location);
+    entities.push(file_module.clone());
+
+    extract_items(
+        &ast.items,
+        &file_module,
+        location,
+        &mut entities,
+        &mut edges,
+        sites,
+    );
+
+    (entities, edges)
 }
 
 /// Record `parent CONTAINS child` and `parent DECLARES child`, then push
@@ -91,12 +116,13 @@ fn child_scope(scope: &str, name: &str) -> String {
     format!("{scope}::{name}")
 }
 
-fn extract_items(
-    items: &[syn::Item],
+fn extract_items<'a>(
+    items: &'a [syn::Item],
     parent: &SyntaxEntity,
     scope: &str,
     entities: &mut Vec<SyntaxEntity>,
     edges: &mut Vec<Edge>,
+    sites: &mut ResolutionSites<'a>,
 ) {
     for item in items {
         match item {
@@ -105,7 +131,7 @@ fn extract_items(
                 let module = SyntaxEntity::new(SyntaxKind::Module, scope, &name);
                 let module_scope = child_scope(scope, &name);
                 if let Some((_, content)) = &item_mod.content {
-                    extract_items(content, &module, &module_scope, entities, edges);
+                    extract_items(content, &module, &module_scope, entities, edges, sites);
                 }
                 declare(parent, module, entities, edges);
             }
@@ -137,6 +163,7 @@ fn extract_items(
                         declare(&entity, method_entity, entities, edges);
                     }
                 }
+                sites.traits.push(item_trait);
                 declare(parent, entity, entities, edges);
             }
             syn::Item::Fn(item_fn) => {
@@ -145,9 +172,16 @@ fn extract_items(
                 let fn_scope = child_scope(scope, &name);
                 extract_params(&item_fn.sig, &entity, &fn_scope, entities, edges);
                 extract_body(&item_fn.block, &entity, &fn_scope, entities, edges);
+                sites
+                    .bodies
+                    .push((entity.clone(), &item_fn.block, fn_scope));
                 declare(parent, entity, entities, edges);
             }
             syn::Item::Impl(item_impl) => {
+                let trait_name = item_impl
+                    .trait_
+                    .as_ref()
+                    .and_then(|(_, path, _)| last_segment_name(path));
                 for impl_item in &item_impl.items {
                     if let syn::ImplItem::Fn(method) = impl_item {
                         let name = method.sig.ident.to_string();
@@ -155,9 +189,18 @@ fn extract_items(
                         let method_scope = child_scope(scope, &name);
                         extract_params(&method.sig, &entity, &method_scope, entities, edges);
                         extract_body(&method.block, &entity, &method_scope, entities, edges);
+                        sites
+                            .bodies
+                            .push((entity.clone(), &method.block, method_scope));
+                        if let Some(trait_name) = &trait_name {
+                            sites
+                                .trait_impl_methods
+                                .push((entity.clone(), trait_name.clone()));
+                        }
                         declare(parent, entity, entities, edges);
                     }
                 }
+                sites.impls.push(item_impl);
             }
             _ => {}
         }
@@ -230,7 +273,6 @@ fn extract_body(
 /// them resolves to `TypeRef::Generic` rather than `TypeRef::Named`.
 /// Anything not handled (tuples, arrays, pointers, ...) becomes
 /// `TypeRef::Unresolved` with its raw source text, never silently dropped.
-#[allow(dead_code)]
 fn extract_type(ty: &syn::Type, generics: &HashSet<String>) -> TypeRef {
     match ty {
         syn::Type::Path(type_path) if type_path.qself.is_none() => {
@@ -256,12 +298,10 @@ fn extract_type(ty: &syn::Type, generics: &HashSet<String>) -> TypeRef {
     }
 }
 
-#[allow(dead_code)]
 fn unresolved_type(ty: &syn::Type) -> TypeRef {
     TypeRef::Unresolved(quote::quote!(#ty).to_string())
 }
 
-#[allow(dead_code)]
 fn extract_generic_args(args: &syn::PathArguments, generics: &HashSet<String>) -> Vec<TypeRef> {
     match args {
         syn::PathArguments::AngleBracketed(angle) => angle
@@ -285,6 +325,11 @@ fn extract_generic_args(args: &syn::PathArguments, generics: &HashSet<String>) -
 /// struct's own `SymbolKind::Type` symbol) and `DEPENDS_ON`-edged to its
 /// resolved type's symbol -- both the field and type symbols are returned
 /// alongside those edges.
+///
+/// Not yet called from `extract_items`/the repository pipeline (unlike the
+/// rest of Phase 6's type extraction, which became reachable once Phase 8's
+/// structural resolvers were wired in) -- struct field extraction is a
+/// narrower, still-open gap left for a future task.
 #[allow(dead_code)]
 fn extract_struct_fields(
     struct_item: &syn::ItemStruct,
@@ -331,6 +376,7 @@ fn extract_struct_fields(
 /// from `fn_symbol` (the function/method's own `SymbolKind::Function`/
 /// `Method` symbol). A signature with no declared return type binds
 /// `RETURNS` to the unit type `()`.
+// Same open gap as `extract_struct_fields` above: not yet wired in.
 #[allow(dead_code)]
 fn extract_signature_types(
     sig: &syn::Signature,
@@ -374,6 +420,7 @@ fn extract_signature_types(
 /// names, to thread into `extract_type`/`extract_signature_types`/
 /// `extract_struct_fields` so a matching usage resolves to
 /// `TypeRef::Generic` rather than an unrelated `Named`.
+// Same open gap as `extract_struct_fields` above: not yet wired in.
 #[allow(dead_code)]
 fn extract_generic_params(
     generics: &syn::Generics,
@@ -405,10 +452,6 @@ fn extract_generic_params(
 /// unhandled forms (closures, macros, ranges, ...) simply aren't descended
 /// into, which is a deliberate scope limit for this phase rather than a
 /// silent-drop of something we claimed to resolve.
-// Phase 7 reference/call/instantiate resolution: a complete, unit-tested
-// per-body resolution pass not yet wired into `LanguageAdapter::resolve_references`
-// -- Phase 9's repository pipeline is the intended integration point.
-#[allow(dead_code)]
 fn walk_expr(expr: &syn::Expr, on_path: &mut impl FnMut(&syn::ExprPath)) {
     match expr {
         syn::Expr::Path(path) => on_path(path),
@@ -465,7 +508,6 @@ fn walk_expr(expr: &syn::Expr, on_path: &mut impl FnMut(&syn::ExprPath)) {
     }
 }
 
-#[allow(dead_code)]
 fn walk_stmt(stmt: &syn::Stmt, on_path: &mut impl FnMut(&syn::ExprPath)) {
     match stmt {
         syn::Stmt::Local(local) => {
@@ -484,7 +526,6 @@ fn walk_stmt(stmt: &syn::Stmt, on_path: &mut impl FnMut(&syn::ExprPath)) {
 /// `unresolved_symbol("unknown-local", ..)` placeholder when the name isn't
 /// found in scope. Multi-segment paths (`std::process::exit`) are left to
 /// call resolution (task 3).
-#[allow(dead_code)]
 fn resolve_references(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
@@ -526,7 +567,6 @@ fn resolve_references(
     (symbols, edges)
 }
 
-#[allow(dead_code)]
 enum CallSite<'a> {
     Free(&'a syn::ExprCall),
     Method(&'a syn::ExprMethodCall),
@@ -536,7 +576,6 @@ enum CallSite<'a> {
 /// (still recursing into their receiver/args to find nested calls), rather
 /// than `syn::Expr::Path` leaves. Same deliberate non-exhaustive scope as
 /// `walk_expr`.
-#[allow(dead_code)]
 fn walk_calls<'a>(expr: &'a syn::Expr, on_call: &mut impl FnMut(CallSite<'a>)) {
     match expr {
         syn::Expr::Call(c) => {
@@ -593,7 +632,6 @@ fn walk_calls<'a>(expr: &'a syn::Expr, on_call: &mut impl FnMut(CallSite<'a>)) {
     }
 }
 
-#[allow(dead_code)]
 fn walk_calls_stmt<'a>(stmt: &'a syn::Stmt, on_call: &mut impl FnMut(CallSite<'a>)) {
     match stmt {
         syn::Stmt::Local(local) => {
@@ -614,7 +652,6 @@ fn walk_calls_stmt<'a>(stmt: &'a syn::Stmt, on_call: &mut impl FnMut(CallSite<'a
 /// symbol in `symbol_table` -- real receiver-type dispatch is out of scope
 /// for this phase (see Phase 8's `OVERRIDES`/`IMPLEMENTS`); an unmatched
 /// method name gets an explicit `"unknown-method"` placeholder.
-#[allow(dead_code)]
 fn resolve_calls(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
@@ -691,7 +728,6 @@ fn resolve_calls(
     (symbols, edges)
 }
 
-#[allow(dead_code)]
 enum InstantiateSite<'a> {
     StructLiteral(&'a syn::ExprStruct),
     Call(&'a syn::ExprCall),
@@ -699,7 +735,6 @@ enum InstantiateSite<'a> {
 
 /// Like `walk_calls`, but surfaces struct-literal expressions (`Point { .. }`)
 /// alongside call expressions (candidate tuple-struct constructors).
-#[allow(dead_code)]
 fn walk_instantiate_sites<'a>(expr: &'a syn::Expr, on_site: &mut impl FnMut(InstantiateSite<'a>)) {
     match expr {
         syn::Expr::Struct(s) => {
@@ -756,7 +791,6 @@ fn walk_instantiate_sites<'a>(expr: &'a syn::Expr, on_site: &mut impl FnMut(Inst
     }
 }
 
-#[allow(dead_code)]
 fn walk_instantiate_stmt<'a>(stmt: &'a syn::Stmt, on_site: &mut impl FnMut(InstantiateSite<'a>)) {
     match stmt {
         syn::Stmt::Local(local) => {
@@ -777,7 +811,6 @@ fn walk_instantiate_stmt<'a>(stmt: &'a syn::Stmt, on_site: &mut impl FnMut(Insta
 /// tuple-struct constructor when the callee resolves in scope to a `Type`
 /// symbol -- an unrecognized call is left to `resolve_calls` rather than
 /// guessed at here.
-#[allow(dead_code)]
 fn resolve_instantiates(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
@@ -846,8 +879,7 @@ fn resolve_instantiates(
 
 /// Run reference, call, and instantiation resolution (tasks 2-4) over one
 /// function/method body in a single pass, combining their symbols/edges.
-#[allow(dead_code)]
-fn resolve_body(
+pub(crate) fn resolve_body(
     block: &syn::Block,
     fn_symbol: &SymbolEntity,
     scope_tree: &ScopeTree,
@@ -878,12 +910,6 @@ fn resolve_body(
 /// The bare declared name of a resolved type, ignoring generic args and
 /// reference wrappers -- what a `SyntaxEntity`'s own `name` field holds for
 /// the struct/enum/trait it names, so it can be looked up by exact match.
-// Phase 8 structural relationship resolution (EXTENDS/IMPLEMENTS/OVERRIDES/
-// IMPORTS/EXPORTS): needs a repository-wide entity list and symbol table
-// (cross-file targets), which the per-file `LanguageAdapter` trait methods
-// can't supply -- Phase 9's repository pipeline is the intended integration
-// point, verified here via the cross-file unit tests below.
-#[allow(dead_code)]
 fn base_type_name(type_ref: &TypeRef) -> String {
     match type_ref {
         TypeRef::Named { name, .. } => name.clone(),
@@ -893,7 +919,6 @@ fn base_type_name(type_ref: &TypeRef) -> String {
     }
 }
 
-#[allow(dead_code)]
 fn find_entity_by_kinds_name<'a>(
     entities: &'a [SyntaxEntity],
     kinds: &[SyntaxKind],
@@ -904,7 +929,6 @@ fn find_entity_by_kinds_name<'a>(
         .find(|e| kinds.contains(&e.kind) && e.name == name)
 }
 
-#[allow(dead_code)]
 fn last_segment_name(path: &syn::Path) -> Option<String> {
     path.segments
         .last()
@@ -918,8 +942,7 @@ fn last_segment_name(path: &syn::Path) -> Option<String> {
 /// from a dependency, or -- unusually -- an impl on a foreign type); such a
 /// side resolves to an explicit `unresolved_symbol` placeholder rather than
 /// being dropped.
-#[allow(dead_code)]
-fn resolve_implements(
+pub(crate) fn resolve_implements(
     item_impl: &syn::ItemImpl,
     entities: &[SyntaxEntity],
     symbol_table: &SymbolTable,
@@ -970,8 +993,7 @@ fn resolve_implements(
 /// Resolve a trait's supertrait bounds (`trait Sub: Super`) into `EXTENDS`
 /// edges from `Sub`'s symbol to each `Super`'s symbol. A supertrait outside
 /// this repository resolves to an explicit `unresolved_symbol` placeholder.
-#[allow(dead_code)]
-fn resolve_supertraits(
+pub(crate) fn resolve_supertraits(
     item_trait: &syn::ItemTrait,
     entities: &[SyntaxEntity],
     symbol_table: &SymbolTable,
@@ -1022,8 +1044,7 @@ fn resolve_supertraits(
 /// counterpart (an inherent-only addition alongside the trait impl) produces
 /// no edge; a trait outside this repository produces an explicit
 /// `unresolved_symbol` placeholder rather than silence.
-#[allow(dead_code)]
-fn resolve_overrides(
+pub(crate) fn resolve_overrides(
     method_name: &str,
     impl_method_symbol: &SymbolEntity,
     trait_name: &str,
@@ -1072,7 +1093,6 @@ fn resolve_overrides(
 /// (`use a::{b, c::d}` yields `[a, b]` and `[a, c, d]`). A glob (`use a::*`)
 /// yields `[a, *]`, resolved as an explicit `glob-import` placeholder by the
 /// caller rather than silently expanded.
-#[allow(dead_code)]
 fn collect_use_paths(tree: &syn::UseTree, prefix: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
     match tree {
         syn::UseTree::Path(path) => {
@@ -1110,8 +1130,7 @@ fn collect_use_paths(tree: &syn::UseTree, prefix: &mut Vec<String>, out: &mut Ve
 /// included) resolves to an explicit `external-crate` placeholder. A local
 /// path that doesn't resolve to any declared item gets its own explicit
 /// `unresolved-local-import` placeholder.
-#[allow(dead_code)]
-fn resolve_imports(
+pub(crate) fn resolve_imports(
     ast: &syn::File,
     module_symbol: &SymbolEntity,
     entities: &[SyntaxEntity],
@@ -1176,8 +1195,7 @@ fn resolve_imports(
 /// `module_symbol`. Only items with a Phase 3 syntax counterpart (struct,
 /// enum, trait, function) are considered; every exported item is by
 /// definition declared in this file, so there's no unresolved case here.
-#[allow(dead_code)]
-fn resolve_exports(
+pub(crate) fn resolve_exports(
     ast: &syn::File,
     module_symbol: &SymbolEntity,
     entities: &[SyntaxEntity],

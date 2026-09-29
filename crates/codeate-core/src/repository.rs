@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::language::LanguageId;
+
 /// A single file within an ingested repository, identified by a path that is
 /// normalized (forward-slash separated) and relative to the repository root,
 /// so identity does not depend on the host OS's path separator.
@@ -8,9 +10,12 @@ pub struct File {
     pub path: String,
     pub content_hash: String,
     pub size_bytes: u64,
+    pub language: LanguageId,
 }
 
 impl File {
+    /// A file with no language classification yet (`LanguageId::Unknown`
+    /// until `detect_languages` runs). Use `with_language` to attach one.
     pub fn new(
         path: impl Into<String>,
         content_hash: impl Into<String>,
@@ -20,7 +25,13 @@ impl File {
             path: normalize_path(&path.into()),
             content_hash: content_hash.into(),
             size_bytes,
+            language: LanguageId::Unknown,
         }
+    }
+
+    pub fn with_language(mut self, language: LanguageId) -> Self {
+        self.language = language;
+        self
     }
 }
 
@@ -67,6 +78,25 @@ mod tests {
     fn file_with_different_hash_is_not_equal() {
         let a = File::new("src/main.rs", "abc123", 42);
         let b = File::new("src/main.rs", "def456", 42);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn new_file_has_unknown_language_until_classified() {
+        let file = File::new("src/main.rs", "abc123", 42);
+        assert_eq!(file.language, LanguageId::Unknown);
+    }
+
+    #[test]
+    fn with_language_attaches_a_classification() {
+        let file = File::new("src/main.rs", "abc123", 42).with_language(LanguageId::known("rust"));
+        assert_eq!(file.language, LanguageId::known("rust"));
+    }
+
+    #[test]
+    fn files_with_different_languages_are_not_equal() {
+        let a = File::new("src/main.rs", "abc123", 42).with_language(LanguageId::known("rust"));
+        let b = File::new("src/main.rs", "abc123", 42);
         assert_ne!(a, b);
     }
 

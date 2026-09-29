@@ -1,6 +1,8 @@
 use std::path::Path;
 
+use crate::error::Result;
 use crate::language::{LanguageDescriptor, LanguageId, LanguageRegistry};
+use crate::repository::Repository;
 
 /// A registry pre-populated with a handful of common languages, enough to
 /// exercise extension- and content-based detection. Not an exhaustive
@@ -69,6 +71,23 @@ pub fn detect(path: &Path, bytes: &[u8], registry: &LanguageRegistry) -> Languag
     detect_by_extension(path, registry)
         .or_else(|| detect_by_content(bytes, registry))
         .unwrap_or(LanguageId::Unknown)
+}
+
+/// Annotate every file in `repository` with its detected language, returning
+/// a new `Repository`. Re-reads each file's bytes from disk (under
+/// `repository.root`) so shebang-based fallback detection has content to
+/// inspect.
+pub fn detect_languages(repository: &Repository, registry: &LanguageRegistry) -> Result<Repository> {
+    let mut files = Vec::with_capacity(repository.files.len());
+
+    for file in &repository.files {
+        let absolute_path = repository.root.join(&file.path);
+        let bytes = std::fs::read(&absolute_path)?;
+        let language = detect(Path::new(&file.path), &bytes, registry);
+        files.push(file.clone().with_language(language));
+    }
+
+    Ok(Repository::new(repository.root.clone(), files))
 }
 
 #[cfg(test)]

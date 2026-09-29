@@ -1,0 +1,3 @@
+scope = ["src", "crates"]
+excludes = ["**/generated/**"]
+target_languages = ["rust", "python"]

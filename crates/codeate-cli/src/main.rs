@@ -273,7 +273,10 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
             Ok(())
         }
         QueryKind::References { id } => {
-            Err(format!("query references --id {id}: not yet implemented"))
+            let id = parse_id(&id)?;
+            require_symbol(&engine, &id)?;
+            print_symbol_list(&engine.references_to(&id), "no references", json);
+            Ok(())
         }
         QueryKind::Impact { id } => Err(format!("query impact --id {id}: not yet implemented")),
         QueryKind::EntryPoints => Err("query entry-points: not yet implemented".to_string()),

@@ -365,6 +365,46 @@ fn query_implementers_finds_a_trait_implementer() {
 }
 
 #[test]
+fn query_references_finds_a_referencing_function() {
+    let repo = TempRepo::new(&[(
+        "src/lib.rs",
+        "pub fn helper() {}\npub fn run() { helper(); }",
+    )]);
+    let store = analyze(&repo);
+    let helper_id = symbol_id(&store, "helper");
+
+    let output = codeate()
+        .args(["query", "references", "--id", &helper_id, "--store"])
+        .arg(&store)
+        .arg("--json")
+        .output()
+        .expect("run codeate query references");
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert!(value
+        .as_array()
+        .expect("json array")
+        .iter()
+        .any(|v| v["name"] == "run"));
+}
+
+#[test]
+fn query_references_rejects_an_unknown_id() {
+    let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
+    let store = analyze(&repo);
+
+    let output = codeate()
+        .args(["query", "references", "--id", "not-a-real-id", "--store"])
+        .arg(&store)
+        .output()
+        .expect("run codeate query references");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
 fn query_implementers_rejects_an_unknown_id() {
     let repo = TempRepo::new(&[("src/lib.rs", "pub fn helper() {}")]);
     let store = analyze(&repo);

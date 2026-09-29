@@ -11,7 +11,7 @@ Status legend: `planned` → `in progress` → `done`
 ---
 
 ## Phase 0 — Project Foundations
-**Status:** planned
+**Status:** done
 
 Rust workspace scaffold and baseline tooling so every later phase has somewhere to land.
 

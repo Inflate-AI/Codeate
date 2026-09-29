@@ -24,7 +24,7 @@ Rust workspace scaffold and baseline tooling so every later phase has somewhere 
 ---
 
 ## Phase 1 — Repository Ingestion
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Repository Ingestion.*
 

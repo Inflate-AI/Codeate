@@ -7,6 +7,38 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 1] — Repository Ingestion
+
+### Added
+
+- `File`/`Repository` entities in `codeate-core` (`repository.rs`): `File { path,
+  content_hash, size_bytes }` with path identity normalized (backslash → forward-slash)
+  so it doesn't depend on the host OS; `Repository { root, files }` — built TDD, 5 unit
+  tests (equality, separator normalization, hash inequality, repository
+  construction/equality).
+- Deterministic content hashing (`hash.rs`): `hash_bytes()` via `sha2`/SHA-256 producing
+  a stable hex digest — built TDD, 4 unit tests (stability, distinctness, known
+  empty-input digest, fixed-length lowercase hex format).
+- `.gitignore`/`.codeateignore`-aware file tree walker (`ingest.rs`): `ingest(root)` uses
+  the `ignore` crate to walk a directory respecting both ignore files, reads and hashes
+  every non-ignored file, and returns a `Repository` with files sorted by path for
+  deterministic ordering — built TDD against a fixture repo (`tests/fixtures/basic_repo/`,
+  including a gitignored `target/` dir and a codeateignored `secrets.local`), 5
+  integration tests (exclusion, sort order, hash/size correctness, missing-root error).
+- Repository-level `codeate.toml` config schema (`config.rs`): `Config { scope, excludes,
+  target_languages }` via `serde`+`toml`, `Config::load(path)` defaulting when the file is
+  absent and returning a clear `Error::Message` on malformed TOML — built TDD, 3 unit
+  tests (full parse, default-on-absent, malformed-is-error) against fixture TOML files.
+- Determinism guarantee integration test: two `ingest()` runs over the same fixture repo
+  assert byte-identical `Repository` results (same file set, order, hashes).
+- New dependencies: `ignore`, `sha2`, `serde` (derive), `toml`.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (26 tests total: 18 `codeate-core` unit, 5 ingestion
+  integration, 3 CLI integration) via `scripts/check.ps1`.
+
 ## [Phase 0] — Project Foundations
 
 ### Added

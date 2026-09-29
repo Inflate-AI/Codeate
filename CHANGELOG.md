@@ -7,6 +7,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 2] — Language Detection
+
+### Added
+
+- `LanguageId` and a pluggable `LanguageRegistry` (`language.rs`): `LanguageId::Known(String)`
+  / `Unknown`, `LanguageDescriptor { id, extensions, shebang_interpreters }`, registry
+  `register`/`by_extension`/`by_shebang_interpreter` — the extension point later language
+  adapters (Phase 4+) register against — built TDD, 5 unit tests.
+- Extension-based detection (`detect.rs`): `detect_by_extension()`, plus `default_registry()`
+  pre-populated with rust, python, javascript, typescript, markdown, toml, json — built TDD,
+  4 unit tests.
+- Shebang-based content-detection fallback: `detect_by_content()` recognizes
+  `#!/usr/bin/env python3`-style and direct-interpreter shebangs for extensionless files —
+  built TDD, 4 unit tests.
+- Combined `detect()` entry point: extension first, shebang fallback, else
+  `LanguageId::Unknown` — detection never silently drops a file — built TDD, 4 unit tests.
+- Detection results attached to ingested files: `File` gained a `language: LanguageId` field
+  (defaults `Unknown`, added non-breakingly via a `with_language()` builder) and
+  `detect_languages(&Repository, &registry) -> Result<Repository>` annotates every file from
+  a Phase 1 ingestion — built TDD, 3 unit tests on `File` plus an integration test against an
+  extended `basic_repo` fixture (added an extensionless python-shebang script and an
+  unknown-extension file) confirming rust/markdown/python/`Unknown` classification.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` all pass (47 tests total: 38 `codeate-core` unit, 1 detect
+  integration, 5 ingest integration, 3 CLI integration) via `scripts/check.ps1`.
+
 ## [Phase 1] — Repository Ingestion
 
 ### Added

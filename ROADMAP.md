@@ -38,7 +38,7 @@ Deterministically enumerate the files that make up a repository.
 ---
 
 ## Phase 2 — Language Detection
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Language Detection.*
 

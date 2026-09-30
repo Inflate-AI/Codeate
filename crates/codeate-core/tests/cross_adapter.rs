@@ -279,3 +279,96 @@ fn go_adapter_produces_equivalent_implements_query_behavior_to_rust_and_python()
         );
     }
 }
+
+/// Phase 17.3 task 7: extend the cross-adapter fixture with an equivalent
+/// JavaScript one. JavaScript's `EXTENDS` (ES6 `class Circle extends
+/// Shape`) is resolved repository-wide the same way Python's `EXTENDS` and
+/// Go's structural `IMPLEMENTS` are, so the *query behavior* for
+/// inheritance/interface-satisfaction matches Rust/Python/Go exactly,
+/// including across files. Also exercises the cross-file `IMPORTS`/
+/// `DEPENDS_ON` path via an ES module `import`, unlike the Go fixture
+/// (which has no import statement to test, per its own comment) -- this
+/// mirrors the original Rust/Python fixture's own IMPORTS/DEPENDS_ON
+/// assertions.
+#[test]
+fn javascript_adapter_produces_equivalent_query_behavior_to_rust_python_and_go() {
+    let js_repo = TempRepo::new(&[
+        (
+            "shape.js",
+            "export class Shape {\n  area() {\n    return 0;\n  }\n}\n",
+        ),
+        (
+            "circle.js",
+            "import { Shape } from \"./shape\";\n\nexport class Circle extends Shape {\n  area() {\n    return helper();\n  }\n}\n\nfunction helper() {\n  return 0;\n}\n",
+        ),
+    ]);
+
+    let js_result = analyze(&js_repo);
+    let (js_graph, js_report) = Graph::build(
+        js_result.syntax_entities.clone(),
+        js_result.symbols.clone(),
+        js_result.edges.clone(),
+    );
+    assert!(js_report.is_clean());
+
+    let js_engine = QueryEngine::new(&js_graph);
+
+    // Structural relationship: Circle relates to Shape across files, via
+    // EXTENDS -- the same query behavior as Rust's IMPLEMENTS, Python's
+    // EXTENDS, and Go's structural IMPLEMENTS.
+    let js_shape = js_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("JavaScript Shape symbol");
+    let js_impact = js_engine.impact_of(&js_shape.id);
+    assert!(
+        js_impact
+            .iter()
+            .any(|id| js_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "JavaScript: Circle should be in Shape's impact set via EXTENDS"
+    );
+
+    // Same-file call: Circle.area calls helper (both declared in circle.js,
+    // matching the same-file-call limitation the Rust/Python/Go fixtures'
+    // own comments already document).
+    let js_helper = js_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("JavaScript helper symbol");
+    let js_callers = js_engine.callers_of(&js_helper.id);
+    assert!(
+        js_callers.iter().any(|s| s.name == "area"),
+        "JavaScript: area should call helper"
+    );
+
+    // Cross-file dependency: circle.js depends on shape.js, via
+    // DEPENDS_ON/IMPORTS -- exercising the ES module import path the Go
+    // fixture deliberately doesn't have.
+    let js_circle_module = js_engine
+        .symbols_named("circle.js")
+        .into_iter()
+        .next()
+        .expect("JavaScript circle module symbol");
+    let js_deps = js_engine.dependencies_of(&js_circle_module.id);
+    assert!(
+        js_deps
+            .iter()
+            .any(|id| js_graph.node(id).is_some_and(|n| n.name() == "shape.js")),
+        "JavaScript: circle.js should depend on shape.js"
+    );
+
+    for kind in [
+        EdgeKind::Calls,
+        EdgeKind::References,
+        EdgeKind::Extends,
+        EdgeKind::Imports,
+        EdgeKind::DependsOn,
+    ] {
+        assert!(
+            js_result.edges.iter().any(|e| e.kind == kind),
+            "JavaScript: expected at least one {kind:?} edge"
+        );
+    }
+}

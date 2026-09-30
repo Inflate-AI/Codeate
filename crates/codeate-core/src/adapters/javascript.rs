@@ -129,7 +129,7 @@ impl LanguageAdapter for JavaScriptAdapter {
 
         for class_node in &sites.classes {
             let (extends_symbols, extends_edges) =
-                resolve_extends(*class_node, &ast.source, &file_entities, symbol_table);
+                resolve_extends(*class_node, &ast.source, all_entities, symbol_table);
             symbols.extend(extends_symbols);
             edges.extend(extends_edges);
         }
@@ -1617,7 +1617,7 @@ mod tests {
     fn an_unresolvable_named_import_gets_an_explicit_placeholder() {
         let adapter = JavaScriptAdapter;
         let module = SyntaxEntity::new(SyntaxKind::Module, "module.js", "module.js");
-        let symbol_table = crate::symbols::build_symbol_table(&[module.clone()]);
+        let symbol_table = crate::symbols::build_symbol_table(std::slice::from_ref(&module));
         let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
 
         let import_ast = adapter.parse("import { Missing } from \"lodash\";\n").unwrap();
@@ -1645,7 +1645,7 @@ mod tests {
     fn a_default_import_binds_by_its_local_name() {
         let adapter = JavaScriptAdapter;
         let module = SyntaxEntity::new(SyntaxKind::Module, "module.js", "module.js");
-        let symbol_table = crate::symbols::build_symbol_table(&[module.clone()]);
+        let symbol_table = crate::symbols::build_symbol_table(std::slice::from_ref(&module));
         let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
 
         let import_ast = adapter.parse("import React from \"react\";\n").unwrap();
@@ -1715,7 +1715,7 @@ mod tests {
     fn a_destructured_require_binds_each_property_name() {
         let adapter = JavaScriptAdapter;
         let module = SyntaxEntity::new(SyntaxKind::Module, "module.js", "module.js");
-        let symbol_table = crate::symbols::build_symbol_table(&[module.clone()]);
+        let symbol_table = crate::symbols::build_symbol_table(std::slice::from_ref(&module));
         let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
 
         let require_ast = adapter

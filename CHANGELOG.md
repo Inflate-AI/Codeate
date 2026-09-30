@@ -7,6 +7,52 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 16] — Public API / SDK Layer
+
+### Added
+
+- New `codeate-api` workspace crate: a thin wrapper depending on `codeate-core`,
+  versioned independently at its own explicit `0.1.0` (not tied to the shared
+  workspace version) since this crate's version is the SemVer contract Phase 16
+  exists to establish -- `codeate-core`'s internals stay free to change between
+  `codeate-api` releases.
+- `Codebase` facade (`crates/codeate-api/src/lib.rs`): `Codebase::open(path)`
+  collapses ingest -> detect -> analyze (incremental via
+  `StoredGraph::update_incremental` if a graph already exists at
+  `<path>/.codeate/graph.json`, full otherwise) -> persist into one call;
+  `refresh()` re-ingests and re-analyzes incrementally against the `Codebase`'s own
+  last-known state; `save()` persists on demand.
+- Full query surface on `Codebase`: every Phase 11 kind (symbol/definition lookup,
+  callers/callees, dependencies/dependents, implementers, references, impact,
+  entry-points, module-tree) plus every Phase 14 kind (packages, dependencies,
+  build-targets, configurations, tests, api-endpoints, generated-files,
+  manifest-entry-points) -- each returning owned data (cloned out of the internal
+  `Graph`/`QueryEngine`), so the facade carries no lifetime parameter for a consumer
+  to manage.
+- Versioning policy documented directly in `lib.rs`'s module doc: what's covered by
+  `codeate-api`'s own SemVer (everything reachable from `Codebase`) vs. what stays
+  free to change (`codeate-core` internals not re-exported here).
+- Agent/LLM consumption contract (`crates/codeate-api/README.md`): every query is a
+  deterministic fact (never inference/ranking), every reference/call/import site
+  resolves to something real or an explicit placeholder (never silently dropped),
+  and results reflect the state as of the last `open`/`refresh` call.
+- API-level tests (`crates/codeate-api/tests/api.rs`) mirroring the CLI's end-to-end
+  coverage: the same fixture repo taken through `Codebase::open` and every query
+  method, plus a dedicated cross-file `use`-import fixture and a `refresh`/`save`
+  round-trip test.
+
+### Verified
+
+- Writing the API-level tests caught two assumptions that didn't match actual
+  behavior: `definition()` returns the *declaring module*, not the symbol's own
+  entity (matches `QueryEngine::definition_of`, cross-checked against the CLI's own
+  test); and a fully-qualified path + `mod X;` declaration doesn't cross-file-link
+  modules the way a `use` import does (a known, pre-existing adapter-scope boundary,
+  not a Phase 16 regression) -- both fixed by correcting the test's expectations, not
+  the adapter.
+- `scripts/check.ps1` (`cargo fmt --check`, `cargo clippy --workspace --all-targets`,
+  `cargo test --workspace`) passes: 296 tests total.
+
 ## [Phase 15] — Second Language Adapter
 
 ### Added

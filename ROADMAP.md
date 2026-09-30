@@ -277,15 +277,22 @@ written.
 ---
 
 ## Phase 16 — Public API / SDK Layer
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Query / API / CLI (programmatic surface).*
 
 Expose Phase 11's query engine as a stable API for external consumers (IDE tools, code
 agents, other developer systems), per README's "Codeate as Infrastructure".
 
-- Stable, versioned API surface (library crate first; wire protocol e.g. JSON-RPC or
-  HTTP if/when a real external consumer needs it).
+- Stable, versioned API surface as its own new `codeate-api` library crate (wrapping
+  `codeate-core`, re-exporting only a curated stable surface rather than everything
+  `codeate-core` makes `pub`) — wire protocol e.g. JSON-RPC or HTTP deferred until a
+  real external consumer needs it.
+- `Codebase` facade collapsing ingest → detect → analyze (incremental-aware) →
+  persist into calls a consumer doesn't need to orchestrate manually, plus a stable
+  query surface mirroring every Phase 11/14 query kind.
+- Documented SemVer policy: what's covered (the `codeate-api` crate's public surface)
+  vs. what stays free to change (`codeate-core` internals).
 - API-level tests mirroring the CLI's end-to-end tests.
 - Documented contract for how an LLM/agent is expected to consume Codeate (query in,
   deterministic facts out — no inference performed by Codeate itself).

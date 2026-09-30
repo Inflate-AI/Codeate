@@ -989,6 +989,14 @@ fn base_type_name(type_ref: &TypeRef) -> String {
         TypeRef::Named { name, .. } => name.clone(),
         TypeRef::Primitive(name) | TypeRef::Generic(name) => name.clone(),
         TypeRef::Reference { inner, .. } => base_type_name(inner),
+        // A union/intersection member type has no single declared name to
+        // look up by -- TypeScript-only shapes (Phase 17.2's canonical-model
+        // addition) the Rust adapter never produces itself, so this arm
+        // exists only to keep the match exhaustive.
+        TypeRef::Union(members) | TypeRef::Intersection(members) => members
+            .first()
+            .map(base_type_name)
+            .unwrap_or_default(),
         TypeRef::Unresolved(raw) => raw.clone(),
     }
 }

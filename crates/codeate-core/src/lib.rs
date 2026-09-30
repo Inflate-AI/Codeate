@@ -20,7 +20,7 @@ pub mod symbols;
 pub mod types;
 
 pub use adapter::LanguageAdapter;
-pub use adapters::{PythonAdapter, RustAdapter};
+pub use adapters::{GoAdapter, PythonAdapter, RustAdapter};
 pub use config::Config;
 pub use detect::{
     default_registry, detect, detect_by_content, detect_by_extension, detect_languages,

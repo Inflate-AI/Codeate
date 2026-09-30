@@ -230,7 +230,7 @@ Avoid full re-analysis on every change.
 ---
 
 ## Phase 14 — Repository-Level State
-**Status:** in progress
+**Status:** done
 
 *Architecture stage: Repository State.*
 

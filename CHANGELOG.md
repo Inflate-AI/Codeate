@@ -7,6 +7,78 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 14] — Repository-Level State
+
+### Added
+
+- Canonical model: 7 new closed `SyntaxKind` variants -- `Dependency`, `BuildTarget`,
+  `Configuration`, `Test`, `EntryPoint`, `ApiEndpoint`, `GeneratedCode` -- alongside the
+  existing `Package`. Every exhaustive match on `SyntaxKind` (`symbols/table.rs`'s
+  syntax→symbol mapping, `symbols/scope.rs`'s scope-binding walk) updated to stay a
+  genuinely closed set; both map the new kinds to no-op/generic behavior since they're
+  never produced by a `LanguageAdapter`'s AST walk.
+- Manifest parsing (`manifest.rs`, new): every ingested `Cargo.toml` with a `[package]`
+  table becomes a `Package` entity; `[dependencies]`/`[dev-dependencies]`/
+  `[build-dependencies]` become `Dependency` entities (`CONTAINS` from the package,
+  `DEPENDS_ON` at the symbol level); `[lib]`/`[[bin]]`/`[[test]]`/`[[bench]]`/
+  `[[example]]` become `BuildTarget` entities, explicit or conventionally detected
+  (`src/lib.rs`/`src/main.rs`); `[profile.*]` sections become `Configuration` entities.
+  Nested-crate manifests resolve target paths relative to their own directory. A
+  manifest with no `[package]` table (a virtual workspace root) is skipped -- built TDD,
+  9 unit tests.
+- Source discovery (`discovery.rs`, new): `#[test]`-attributed functions become `Test`
+  entities `REFERENCES`-linked to their already-resolved `Function` symbol; common
+  route attributes (`#[get]`/`#[post]`/`#[put]`/`#[delete]`/`#[patch]`/`#[route]`)
+  become `ApiEndpoint` entities (best-effort, per the README's "adapter-dependent"
+  scoping); an `@generated` marker in a file's first 5 lines flags it as a
+  `GeneratedCode` entity (best-effort); a bin target's `main` function or a lib
+  target's crate-root module becomes a first-class `EntryPoint` entity tied to its
+  `BuildTarget` via `CONTAINS` -- built TDD, 7 unit tests.
+- `pipeline::merge_repository_state`/`analyze_repository_state`: folds manifest +
+  discovery output into a Phase 4-8 `AnalysisResult`, verified to produce a clean
+  `IntegrityReport` (no dangling edges) on a merged fixture.
+- 8 new `QueryEngine` methods and CLI query subcommands: `packages`,
+  `package-dependencies`, `build-targets`, `configurations`, `tests`, `api-endpoints`,
+  `generated-files`, `manifest-entry-points`. The existing `entry-points`
+  (function-named-`main` heuristic) is untouched, for backward compatibility.
+- `codeate analyze`'s full-analysis path now calls `analyze_repository_state` instead
+  of `analyze_repository`, so every `analyze` run (not just a dedicated command)
+  produces Phase 14 state.
+- End-to-end coverage (`codeate-cli/tests/cli.rs`): a fixture repository with a real
+  `Cargo.toml` (a dependency, an explicit `[[bin]]`, a `[profile.release]`) plus a
+  `#[test]`-attributed function and a `main`, taken through `analyze` and every new
+  query kind in both output modes.
+
+### Fixed
+
+- `StoredGraph::update_incremental` (Phase 13) strips Phase 14 data back out of a
+  stored graph before feeding it to `analyze_incremental` as "previous" (Phase 14 state
+  is always recomputed fresh, not carried through incremental analysis -- it isn't
+  file-content keyed the way Phase 4-8's carry-over logic assumes). That stripping
+  filtered entities and symbols but not edges. `analyze_incremental`'s no-change
+  short-circuit returns its input verbatim, bypassing the endpoint-based edge filtering
+  the normal path gets -- so a stale Phase 14 edge rode straight through, and a fresh
+  set got appended on top of it on every subsequent `analyze`, growing the edge count
+  on every run even with zero source changes. Found by dogfooding `codeate analyze .`
+  against Codeate's own repository three times in a row (9195 -> 9473 -> ... edges);
+  the existing test suite didn't cover a genuinely no-op re-analyze with Phase 14 data
+  present. Fixed by filtering edges the same way entities/symbols already were; added
+  `update_incremental_recomputes_phase_14_state_fresh_across_repeated_runs` (source
+  change -> manifest change -> no-op re-analyze) to guard the specific sequence that
+  exposed it.
+
+### Verified
+
+- Dogfooded against Codeate's own workspace: `codeate analyze .` correctly found both
+  crates' `Package`s, every real dependency (`clap`, `syn`, `sha2`, ...), both
+  `BuildTarget`s (`lib:codeate-core`, `bin:codeate`), hundreds of real `#[test]`
+  functions, and both entry points -- and repeated `analyze` runs leave the graph
+  stable (same entity/symbol/edge counts every time).
+- `scripts/check.ps1` (`cargo fmt --check`, `cargo clippy --workspace --all-targets`,
+  `cargo test --workspace`) passes: 248 tests total (28 `codeate-cli` integration, 206
+  `codeate-core` unit, 3 symbols end-to-end, 1 golden-file, 4 model invariant, 1 detect,
+  5 ingest).
+
 ## [Phase 13] — Incremental Analysis
 
 ### Added

@@ -92,6 +92,22 @@ enum QueryKind {
     EntryPoints,
     /// The nested module hierarchy.
     ModuleTree,
+    /// Every `Cargo.toml` package in the repository.
+    Packages,
+    /// Every declared dependency across every manifest.
+    PackageDependencies,
+    /// Every build target (`lib`/`bin`/`test`/`bench`/`example`).
+    BuildTargets,
+    /// Every `[profile.*]` configuration.
+    Configurations,
+    /// Every `#[test]`-attributed function.
+    Tests,
+    /// Every detected API route (best-effort).
+    ApiEndpoints,
+    /// Every file flagged as machine-generated (best-effort).
+    GeneratedFiles,
+    /// Every first-class entry point tied to a build target.
+    ManifestEntryPoints,
 }
 
 fn main() {
@@ -139,8 +155,8 @@ fn run_analyze(args: AnalyzeArgs) -> Result<(), String> {
             (stored, "incrementally")
         }
         None => {
-            let analysis =
-                codeate_core::analyze_repository(&repository).map_err(|err| err.to_string())?;
+            let analysis = codeate_core::analyze_repository_state(&repository)
+                .map_err(|err| err.to_string())?;
             (
                 codeate_core::StoredGraph::from_analysis(&analysis, &repository.files),
                 "fully",
@@ -412,6 +428,38 @@ fn run_query(args: QueryArgs) -> Result<(), String> {
                     print_module_tree(root, 0);
                 }
             }
+            Ok(())
+        }
+        QueryKind::Packages => {
+            print_syntax_list(&engine.packages(), "no packages", json);
+            Ok(())
+        }
+        QueryKind::PackageDependencies => {
+            print_syntax_list(&engine.package_dependencies(), "no dependencies", json);
+            Ok(())
+        }
+        QueryKind::BuildTargets => {
+            print_syntax_list(&engine.build_targets(), "no build targets", json);
+            Ok(())
+        }
+        QueryKind::Configurations => {
+            print_syntax_list(&engine.configurations(), "no configurations", json);
+            Ok(())
+        }
+        QueryKind::Tests => {
+            print_syntax_list(&engine.tests(), "no tests", json);
+            Ok(())
+        }
+        QueryKind::ApiEndpoints => {
+            print_syntax_list(&engine.api_endpoints(), "no api endpoints", json);
+            Ok(())
+        }
+        QueryKind::GeneratedFiles => {
+            print_syntax_list(&engine.generated_files(), "no generated files", json);
+            Ok(())
+        }
+        QueryKind::ManifestEntryPoints => {
+            print_syntax_list(&engine.manifest_entry_points(), "no entry points", json);
             Ok(())
         }
     }

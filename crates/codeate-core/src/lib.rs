@@ -34,7 +34,10 @@ pub use ingest::ingest;
 pub use language::{LanguageDescriptor, LanguageId, LanguageRegistry};
 pub use manifest::{parse_manifests, BuildTargetInfo, BuildTargetKind, ManifestResult};
 pub use model::{Edge, EdgeKind, EntityId, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
-pub use pipeline::{analyze_incremental, analyze_repository, AnalysisResult};
+pub use pipeline::{
+    analyze_incremental, analyze_repository, analyze_repository_state, merge_repository_state,
+    AnalysisResult,
+};
 pub use query::{ModuleTree, QueryEngine};
 pub use repository::{File, Repository};
 pub use resolve::{resolve_depends_on, unresolved_symbol};

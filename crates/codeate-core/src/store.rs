@@ -55,26 +55,109 @@ impl StoredGraph {
         Graph::build(self.syntax_entities, self.symbols, self.edges)
     }
 
-    /// This state's contents as an `AnalysisResult`, for feeding back into
-    /// `analyze_incremental`.
+    /// This state's Phase 4-8 contents as an `AnalysisResult`, for feeding
+    /// back into `analyze_incremental` -- with Phase 14's repository-level
+    /// entities/symbols (manifest parsing + discovery) stripped back out.
+    /// Phase 14 state is always recomputed fresh (`merge_repository_state`),
+    /// never carried through incremental analysis: it isn't file-content
+    /// keyed the way Phase 4-8's `owner_file`-driven carry-over logic
+    /// assumes (a `Dependency` symbol's `DEPENDS_ON` edge to its `Package`
+    /// would silently vanish otherwise, since `analyze_incremental` treats
+    /// `DEPENDS_ON` as always-recomputed-by-`resolve_depends_on`, which
+    /// knows nothing about manifests).
     fn as_analysis_result(&self) -> AnalysisResult {
+        use crate::model::SymbolKind;
+
+        const PHASE_14_SYNTAX_KINDS: [crate::model::SyntaxKind; 8] = [
+            crate::model::SyntaxKind::Package,
+            crate::model::SyntaxKind::Dependency,
+            crate::model::SyntaxKind::BuildTarget,
+            crate::model::SyntaxKind::Configuration,
+            crate::model::SyntaxKind::Test,
+            crate::model::SyntaxKind::EntryPoint,
+            crate::model::SyntaxKind::ApiEndpoint,
+            crate::model::SyntaxKind::GeneratedCode,
+        ];
+
+        // Phase 14 symbols: only Package (-> Namespace) and Dependency
+        // (-> Constant) entities get one, built directly by manifest.rs
+        // rather than through the generic symbol table. Their id is
+        // re-derived from the entity being excluded (same location + name,
+        // same construction `SymbolEntity::new` uses) so no extra
+        // bookkeeping needs to be persisted just to reverse this merge.
+        let mut excluded_symbol_ids: std::collections::HashSet<EntityId> =
+            std::collections::HashSet::new();
+        for entity in self.syntax_entities.iter().filter(|e| {
+            matches!(
+                e.kind,
+                crate::model::SyntaxKind::Package | crate::model::SyntaxKind::Dependency
+            )
+        }) {
+            let Some(location) = self.owner_file.get(&entity.id) else {
+                continue;
+            };
+            let symbol_kind = match entity.kind {
+                crate::model::SyntaxKind::Package => SymbolKind::Namespace,
+                _ => SymbolKind::Constant,
+            };
+            excluded_symbol_ids.insert(SymbolEntity::new(symbol_kind, location, &entity.name).id);
+        }
+
+        let syntax_entities: Vec<SyntaxEntity> = self
+            .syntax_entities
+            .iter()
+            .filter(|e| !PHASE_14_SYNTAX_KINDS.contains(&e.kind))
+            .cloned()
+            .collect();
+        let symbols: Vec<SymbolEntity> = self
+            .symbols
+            .iter()
+            .filter(|s| !excluded_symbol_ids.contains(&s.id))
+            .cloned()
+            .collect();
+
+        let kept_ids: std::collections::HashSet<&EntityId> = syntax_entities
+            .iter()
+            .map(|e| &e.id)
+            .chain(symbols.iter().map(|s| &s.id))
+            .collect();
+        let owner_file: HashMap<EntityId, String> = self
+            .owner_file
+            .iter()
+            .filter(|(id, _)| kept_ids.contains(id))
+            .map(|(id, path)| (id.clone(), path.clone()))
+            .collect();
+        // Edges must be filtered too, not just entities/symbols: an
+        // unfiltered Phase 14 edge (e.g. a Dependency's DEPENDS_ON to its
+        // Package) left in here would ride through analyze_incremental
+        // untouched (or get duplicated once merge_repository_state adds a
+        // fresh one back), even though its endpoints were just stripped.
+        let edges: Vec<Edge> = self
+            .edges
+            .iter()
+            .filter(|edge| kept_ids.contains(&edge.from) && kept_ids.contains(&edge.to))
+            .cloned()
+            .collect();
+
         AnalysisResult {
-            syntax_entities: self.syntax_entities.clone(),
-            symbols: self.symbols.clone(),
-            edges: self.edges.clone(),
-            owner_file: self.owner_file.clone(),
+            syntax_entities,
+            symbols,
+            edges,
+            owner_file,
         }
     }
 
     /// Patch this stored state against `repository`'s current contents:
     /// re-analyze only what changed (Phase 13's `analyze_incremental`),
-    /// drop everything owned by removed files, merge in the rest, and
-    /// re-run Phase 9's integrity checks on the result before it's
-    /// considered valid. Equivalent to a full re-`analyze` + `from_analysis`
-    /// for the same `repository`, just without redoing unaffected work.
+    /// drop everything owned by removed files, merge in the rest, recompute
+    /// Phase 14's repository-level state fresh, and re-run Phase 9's
+    /// integrity checks on the result before it's considered valid.
+    /// Equivalent to a full re-`analyze` + `from_analysis` for the same
+    /// `repository`, just without redoing unaffected Phase 4-8 work.
     pub fn update_incremental(&self, repository: &Repository) -> Result<(Self, IntegrityReport)> {
         let previous_result = self.as_analysis_result();
         let updated_result = analyze_incremental(repository, &self.files, &previous_result)?;
+        let updated_result = crate::pipeline::merge_repository_state(updated_result, repository)?;
         let updated = Self::from_analysis(&updated_result, &repository.files);
 
         let (_, report) = Graph::build(
@@ -284,6 +367,107 @@ mod tests {
         let (patched_graph, _) = patched.into_graph();
         let (full_graph, _) = full_stored.into_graph();
         assert_eq!(patched_graph.canonical_form(), full_graph.canonical_form());
+    }
+
+    #[test]
+    fn update_incremental_recomputes_phase_14_state_fresh_across_repeated_runs() {
+        let repo = TempRepo::new(&[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"widgets\"\n\n[dependencies]\nserde = \"1\"\n",
+            ),
+            ("src/lib.rs", "pub struct Point { pub x: i32 }"),
+        ]);
+        let repository = repo.hashed();
+        let analysis =
+            crate::pipeline::analyze_repository_state(&repository).expect("initial analysis");
+        let stored = StoredGraph::from_analysis(&analysis, &repository.files);
+        assert!(stored
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Dependency && e.name == "serde"));
+
+        // First incremental round: unrelated source change.
+        std::fs::write(
+            repo.root.join("src/lib.rs"),
+            "pub struct Point { pub x: i32 }\npub struct Line { pub a: i32 }",
+        )
+        .expect("rewrite lib.rs");
+        let repository_1 = repo.hashed();
+        let (patched_1, report_1) = stored
+            .update_incremental(&repository_1)
+            .expect("first update_incremental succeeds");
+        assert!(report_1.is_clean());
+        assert!(patched_1
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Dependency && e.name == "serde"));
+        assert!(patched_1
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Struct && e.name == "Line"));
+
+        // Second incremental round: the manifest itself changes (a
+        // dependency is added). A prior bug here would either lose the
+        // DEPENDS_ON edge or silently duplicate Package/Dependency data
+        // across rounds.
+        std::fs::write(
+            repo.root.join("Cargo.toml"),
+            "[package]\nname = \"widgets\"\n\n[dependencies]\nserde = \"1\"\nanyhow = \"1\"\n",
+        )
+        .expect("rewrite Cargo.toml");
+        let repository_2 = repo.hashed();
+        let (patched_2, report_2) = patched_1
+            .update_incremental(&repository_2)
+            .expect("second update_incremental succeeds");
+        assert!(report_2.is_clean());
+
+        let package_count = patched_2
+            .syntax_entities
+            .iter()
+            .filter(|e| e.kind == SyntaxKind::Package)
+            .count();
+        assert_eq!(package_count, 1, "Package entity must not duplicate");
+        assert!(patched_2
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Dependency && e.name == "anyhow"));
+        assert!(patched_2
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Dependency && e.name == "serde"));
+
+        let full_rebuild = crate::pipeline::analyze_repository_state(&repository_2)
+            .expect("full rebuild succeeds");
+        let full_stored = StoredGraph::from_analysis(&full_rebuild, &repository_2.files);
+        let (full_graph, _) = full_stored.into_graph();
+        let (patched_2_graph, _) = patched_2.clone().into_graph();
+        assert_eq!(
+            patched_2_graph.canonical_form(),
+            full_graph.canonical_form()
+        );
+
+        // Third round: no changes at all. `analyze_incremental` takes a
+        // short-circuit path here (returns the previous result verbatim)
+        // that bypasses the endpoint-based edge filtering the "real change"
+        // path gets -- a prior bug left stale Phase 14 edges in the
+        // purified "previous" fed into that short-circuit, so a genuinely
+        // no-op re-analyze silently duplicated every Phase 14 edge.
+        let edge_count_before = patched_2.edges.len();
+        let (patched_3, report_3) = patched_2
+            .update_incremental(&repository_2)
+            .expect("third (no-op) update_incremental succeeds");
+        assert!(report_3.is_clean());
+        assert_eq!(
+            patched_3.edges.len(),
+            edge_count_before,
+            "a no-op incremental re-analyze must not change the edge count"
+        );
+        let (patched_3_graph, _) = patched_3.into_graph();
+        assert_eq!(
+            patched_3_graph.canonical_form(),
+            full_graph.canonical_form()
+        );
     }
 
     #[test]

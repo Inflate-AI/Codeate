@@ -317,6 +317,38 @@ pub fn analyze_incremental(
     run_pipeline(repository, Some(&files_filter), carry_in)
 }
 
+/// Merge Phase 14's repository-level state (manifest parsing + source
+/// discovery) into an already-computed Phase 4-8 `analysis`, given the same
+/// `repository` it was produced from. `analysis` may come from either
+/// `analyze_repository` or `analyze_incremental` -- Phase 14's own state is
+/// always recomputed fresh over the full current repository rather than
+/// incrementally (manifest parsing is cheap; only worth optimizing later if
+/// it shows up as a real cost).
+pub fn merge_repository_state(
+    mut analysis: AnalysisResult,
+    repository: &Repository,
+) -> Result<AnalysisResult> {
+    let manifest = crate::manifest::parse_manifests(repository)?;
+    let discovery = crate::discovery::discover(repository, &analysis, &manifest)?;
+
+    analysis.syntax_entities.extend(manifest.entities);
+    analysis.symbols.extend(manifest.symbols);
+    analysis.edges.extend(manifest.edges);
+    analysis.owner_file.extend(manifest.owner_file);
+
+    analysis.syntax_entities.extend(discovery.entities);
+    analysis.edges.extend(discovery.edges);
+    analysis.owner_file.extend(discovery.owner_file);
+
+    Ok(analysis)
+}
+
+/// `analyze_repository` followed by `merge_repository_state` -- the full
+/// Phase 4-8 + Phase 14 pipeline in one call.
+pub fn analyze_repository_state(repository: &Repository) -> Result<AnalysisResult> {
+    merge_repository_state(analyze_repository(repository)?, repository)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,6 +421,49 @@ mod tests {
         let repository = crate::ingest::ingest(root).expect("ingest succeeds");
         let registry = crate::detect::default_registry();
         crate::detect::detect_languages(&repository, &registry).expect("detect succeeds")
+    }
+
+    #[test]
+    fn analyze_repository_state_merges_manifest_and_discovery_into_the_graph() {
+        let repo = write_repo(&[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"widgets\"\n\n[dependencies]\nserde = \"1\"\n",
+            ),
+            ("src/main.rs", "fn main() {}\n\n#[test]\nfn it_works() {}"),
+        ]);
+        let repository = hashed_repo(&repo.root);
+
+        let result = analyze_repository_state(&repository).expect("analysis succeeds");
+
+        assert!(result
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Package && e.name == "widgets"));
+        assert!(result
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Dependency && e.name == "serde"));
+        assert!(result
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::BuildTarget && e.name == "bin:widgets"));
+        assert!(result
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::EntryPoint));
+        assert!(result
+            .syntax_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Test && e.name == "it_works"));
+
+        let (graph, report) = Graph::build(
+            result.syntax_entities.clone(),
+            result.symbols.clone(),
+            result.edges.clone(),
+        );
+        assert!(report.is_clean());
+        assert!(graph.node_count() > 0);
     }
 
     #[test]

@@ -691,3 +691,102 @@ fn full_pipeline_end_to_end_covers_every_query_kind_in_both_modes() {
         }
     }
 }
+
+/// Phase 14 end-to-end coverage: a fixture repository with a real
+/// `Cargo.toml` (a dependency, an explicit `[[bin]]`, a `[profile.release]`)
+/// plus a `#[test]`-attributed function and a `main`, taken through
+/// `analyze` and every Phase 14 `query` subcommand in both output modes.
+#[test]
+fn phase_14_end_to_end_covers_manifest_and_discovery_query_kinds_in_both_modes() {
+    let repo = TempRepo::new(&[
+        (
+            "Cargo.toml",
+            "[package]\n\
+             name = \"widgets\"\n\
+             \n\
+             [dependencies]\n\
+             serde = \"1\"\n\
+             \n\
+             [[bin]]\n\
+             name = \"widgets-cli\"\n\
+             path = \"src/main.rs\"\n\
+             \n\
+             [profile.release]\n\
+             opt-level = 3\n",
+        ),
+        (
+            "src/main.rs",
+            "fn add(a: i32, b: i32) -> i32 { a + b }\n\
+             fn main() { add(1, 2); }\n\
+             \n\
+             #[test]\n\
+             fn it_adds() { assert_eq!(add(1, 1), 2); }\n",
+        ),
+    ]);
+    let store = analyze(&repo);
+
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&store).expect("read store"))
+            .expect("store is valid json");
+    let kind_counts = |kind: &str| -> usize {
+        stored["syntax_entities"]
+            .as_array()
+            .expect("syntax_entities array")
+            .iter()
+            .filter(|e| e["kind"] == kind)
+            .count()
+    };
+    assert_eq!(kind_counts("Package"), 1);
+    assert_eq!(kind_counts("Dependency"), 1);
+    assert_eq!(kind_counts("BuildTarget"), 1);
+    assert_eq!(kind_counts("Configuration"), 1);
+    assert_eq!(kind_counts("Test"), 1);
+    assert_eq!(kind_counts("EntryPoint"), 1);
+
+    let cases: &[&[&str]] = &[
+        &["packages"],
+        &["package-dependencies"],
+        &["build-targets"],
+        &["configurations"],
+        &["tests"],
+        &["api-endpoints"],
+        &["generated-files"],
+        &["manifest-entry-points"],
+    ];
+
+    for case in cases {
+        for json_flag in [false, true] {
+            let mut command = codeate();
+            command.arg("query").args(*case).arg("--store").arg(&store);
+            if json_flag {
+                command.arg("--json");
+            }
+            let output = command.output().expect("run codeate query");
+            assert!(
+                output.status.success(),
+                "case {:?} (json={}) failed: {}",
+                case,
+                json_flag,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if json_flag {
+                let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+                    .unwrap_or_else(|err| panic!("case {:?} produced invalid json: {err}", case));
+                let array = value.as_array().expect("json array");
+                if !matches!(*case, ["api-endpoints"] | ["generated-files"]) {
+                    assert!(
+                        !array.is_empty(),
+                        "case {:?} produced an empty result",
+                        case
+                    );
+                }
+            } else {
+                assert!(
+                    !output.stdout.is_empty(),
+                    "case {:?} produced no human-readable output",
+                    case
+                );
+            }
+        }
+    }
+}

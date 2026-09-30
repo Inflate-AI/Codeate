@@ -195,6 +195,65 @@ impl<'g> QueryEngine<'g> {
         }
     }
 
+    // -- Phase 14: repository-level state ---------------------------------
+
+    fn entities_of_kind(&self, kind: SyntaxKind) -> Vec<&'g SyntaxEntity> {
+        self.graph
+            .node_ids()
+            .filter_map(|id| match self.graph.node(id) {
+                Some(Node::Syntax(entity)) if entity.kind == kind => Some(entity),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every `Package` entity (one per `Cargo.toml` with a `[package]` table).
+    pub fn packages(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::Package)
+    }
+
+    /// Every `Dependency` entity declared across every manifest's
+    /// `[dependencies]`/`[dev-dependencies]`/`[build-dependencies]`.
+    pub fn package_dependencies(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::Dependency)
+    }
+
+    /// Every `BuildTarget` entity (`[lib]`/`[[bin]]`/`[[test]]`/`[[bench]]`/
+    /// `[[example]]`, explicit or conventionally-detected).
+    pub fn build_targets(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::BuildTarget)
+    }
+
+    /// Every `Configuration` entity (`[profile.*]` sections).
+    pub fn configurations(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::Configuration)
+    }
+
+    /// Every `Test` entity (`#[test]`-attributed functions).
+    pub fn tests(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::Test)
+    }
+
+    /// Every `ApiEndpoint` entity (best-effort: common Rust web-framework
+    /// route attributes).
+    pub fn api_endpoints(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::ApiEndpoint)
+    }
+
+    /// Every `GeneratedCode` entity (best-effort: files carrying an
+    /// `@generated` marker in their first few lines).
+    pub fn generated_files(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::GeneratedCode)
+    }
+
+    /// Every first-class `EntryPoint` entity discovered from a
+    /// `BuildTarget` (a bin target's `main`, or a lib target's crate root)
+    /// -- distinct from `entry_points()`'s function-name heuristic above,
+    /// which stays as-is for backward compatibility.
+    pub fn manifest_entry_points(&self) -> Vec<&'g SyntaxEntity> {
+        self.entities_of_kind(SyntaxKind::EntryPoint)
+    }
+
     // -- shared helpers -----------------------------------------------------
 
     fn symbols_at_incoming(&self, id: &EntityId, kind: EdgeKind) -> Vec<&'g SymbolEntity> {
@@ -271,6 +330,43 @@ mod tests {
 
     fn symbol(kind: SymbolKind, name: &str) -> SymbolEntity {
         SymbolEntity::new(kind, "src/lib.rs", name)
+    }
+
+    #[test]
+    fn phase_14_kinds_are_each_queryable_by_their_own_method() {
+        let package = SyntaxEntity::new(SyntaxKind::Package, "Cargo.toml", "widgets");
+        let dependency = SyntaxEntity::new(SyntaxKind::Dependency, "Cargo.toml", "serde");
+        let build_target = SyntaxEntity::new(SyntaxKind::BuildTarget, "Cargo.toml", "bin:widgets");
+        let configuration = SyntaxEntity::new(SyntaxKind::Configuration, "Cargo.toml", "release");
+        let test_entity = syntax(SyntaxKind::Test, "it_works");
+        let endpoint = syntax(SyntaxKind::ApiEndpoint, "get:list");
+        let generated = syntax(SyntaxKind::GeneratedCode, "src/generated.rs");
+        let entry_point = syntax(SyntaxKind::EntryPoint, "src/main.rs");
+
+        let (graph, _) = Graph::build(
+            vec![
+                package.clone(),
+                dependency.clone(),
+                build_target.clone(),
+                configuration.clone(),
+                test_entity.clone(),
+                endpoint.clone(),
+                generated.clone(),
+                entry_point.clone(),
+            ],
+            vec![],
+            vec![],
+        );
+        let engine = QueryEngine::new(&graph);
+
+        assert_eq!(engine.packages(), vec![&package]);
+        assert_eq!(engine.package_dependencies(), vec![&dependency]);
+        assert_eq!(engine.build_targets(), vec![&build_target]);
+        assert_eq!(engine.configurations(), vec![&configuration]);
+        assert_eq!(engine.tests(), vec![&test_entity]);
+        assert_eq!(engine.api_endpoints(), vec![&endpoint]);
+        assert_eq!(engine.generated_files(), vec![&generated]);
+        assert_eq!(engine.manifest_entry_points(), vec![&entry_point]);
     }
 
     #[test]

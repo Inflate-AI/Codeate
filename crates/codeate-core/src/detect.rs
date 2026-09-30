@@ -32,6 +32,8 @@ pub fn default_registry() -> LanguageRegistry {
     // future sub-phase, 17.8) and isn't registered here, so a header file
     // detects as Unknown rather than being guessed at.
     registry.register(LanguageDescriptor::new(LanguageId::known("c")).with_extensions(["c"]));
+    registry
+        .register(LanguageDescriptor::new(LanguageId::known("csharp")).with_extensions(["cs"]));
     registry.register(
         LanguageDescriptor::new(LanguageId::known("markdown")).with_extensions(["md", "markdown"]),
     );
@@ -144,6 +146,15 @@ mod tests {
         assert_eq!(
             detect_by_extension(Path::new("src/main.c"), &registry),
             Some(LanguageId::known("c"))
+        );
+    }
+
+    #[test]
+    fn detects_csharp_by_extension() {
+        let registry = default_registry();
+        assert_eq!(
+            detect_by_extension(Path::new("src/Program.cs"), &registry),
+            Some(LanguageId::known("csharp"))
         );
     }
 

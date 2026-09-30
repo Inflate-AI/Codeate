@@ -1,0 +1,15 @@
+[package]
+name = "codeate-api"
+# Independent of workspace.package.version: this crate's version is the
+# SemVer contract Phase 16 exists to establish, and must be free to move on
+# its own schedule -- not tied to codeate-core/codeate-cli's internal,
+# not-yet-stable version. See src/lib.rs's module doc for the policy.
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+codeate-core = { path = "../codeate-core" }
+
+[dev-dependencies]
+serde_json.workspace = true

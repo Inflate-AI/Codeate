@@ -67,6 +67,18 @@ fn symbol_kind_for(kind: SyntaxKind) -> Option<SymbolKind> {
         // variables and parameters resolve to the generic Symbol kind.
         SyntaxKind::Variable | SyntaxKind::Parameter => Some(SymbolKind::Symbol),
         SyntaxKind::Statement | SyntaxKind::Expression => None,
+        // Phase 14's repository-level kinds are never produced by a
+        // LanguageAdapter's `extract()`, so `build_symbol_table` never sees
+        // them in practice -- `manifest.rs` builds their symbols directly,
+        // the same way Phase 6's struct fields bypass this table. Mapped to
+        // the generic Symbol kind here purely so this match stays exhaustive.
+        SyntaxKind::Dependency
+        | SyntaxKind::BuildTarget
+        | SyntaxKind::Configuration
+        | SyntaxKind::Test
+        | SyntaxKind::EntryPoint
+        | SyntaxKind::ApiEndpoint
+        | SyntaxKind::GeneratedCode => Some(SymbolKind::Symbol),
     }
 }
 

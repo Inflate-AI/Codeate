@@ -4,6 +4,11 @@ use crate::model::id::EntityId;
 /// recognizes. Every language adapter maps its AST onto exactly these
 /// kinds — there is no catch-all "other" variant, so an unmapped
 /// construct is a model gap to fix here, not something to smuggle through.
+///
+/// `Dependency`/`BuildTarget`/`Configuration`/`Test`/`EntryPoint`/
+/// `ApiEndpoint`/`GeneratedCode` (Phase 14) are repository-level facts, not
+/// AST nodes — produced by manifest parsing and best-effort source
+/// inspection (`manifest.rs`) rather than a `LanguageAdapter`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SyntaxKind {
     Module,
@@ -18,6 +23,13 @@ pub enum SyntaxKind {
     Parameter,
     Statement,
     Expression,
+    Dependency,
+    BuildTarget,
+    Configuration,
+    Test,
+    EntryPoint,
+    ApiEndpoint,
+    GeneratedCode,
 }
 
 impl SyntaxKind {
@@ -35,6 +47,13 @@ impl SyntaxKind {
             SyntaxKind::Parameter => "Parameter",
             SyntaxKind::Statement => "Statement",
             SyntaxKind::Expression => "Expression",
+            SyntaxKind::Dependency => "Dependency",
+            SyntaxKind::BuildTarget => "BuildTarget",
+            SyntaxKind::Configuration => "Configuration",
+            SyntaxKind::Test => "Test",
+            SyntaxKind::EntryPoint => "EntryPoint",
+            SyntaxKind::ApiEndpoint => "ApiEndpoint",
+            SyntaxKind::GeneratedCode => "GeneratedCode",
         }
     }
 }
@@ -64,7 +83,7 @@ impl SyntaxEntity {
 mod tests {
     use super::*;
 
-    const ALL_KINDS: [SyntaxKind; 12] = [
+    const ALL_KINDS: [SyntaxKind; 19] = [
         SyntaxKind::Module,
         SyntaxKind::Package,
         SyntaxKind::Class,
@@ -77,6 +96,13 @@ mod tests {
         SyntaxKind::Parameter,
         SyntaxKind::Statement,
         SyntaxKind::Expression,
+        SyntaxKind::Dependency,
+        SyntaxKind::BuildTarget,
+        SyntaxKind::Configuration,
+        SyntaxKind::Test,
+        SyntaxKind::EntryPoint,
+        SyntaxKind::ApiEndpoint,
+        SyntaxKind::GeneratedCode,
     ];
 
     // Exhaustive match with no wildcard arm: this only compiles if every
@@ -96,6 +122,13 @@ mod tests {
             SyntaxKind::Parameter => "Parameter",
             SyntaxKind::Statement => "Statement",
             SyntaxKind::Expression => "Expression",
+            SyntaxKind::Dependency => "Dependency",
+            SyntaxKind::BuildTarget => "BuildTarget",
+            SyntaxKind::Configuration => "Configuration",
+            SyntaxKind::Test => "Test",
+            SyntaxKind::EntryPoint => "EntryPoint",
+            SyntaxKind::ApiEndpoint => "ApiEndpoint",
+            SyntaxKind::GeneratedCode => "GeneratedCode",
         }
     }
 

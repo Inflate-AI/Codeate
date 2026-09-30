@@ -80,7 +80,20 @@ impl ScopeTree {
                 | SyntaxKind::Parameter => {
                     self.bind(scope_idx, &child.name, child.id.clone());
                 }
-                SyntaxKind::Package | SyntaxKind::Statement | SyntaxKind::Expression => {}
+                // Phase 14's repository-level kinds never appear in an
+                // adapter's AST-derived CONTAINS tree (manifest.rs builds
+                // their own entities/edges directly), so they bind nothing
+                // here, same as Package/Statement/Expression.
+                SyntaxKind::Package
+                | SyntaxKind::Statement
+                | SyntaxKind::Expression
+                | SyntaxKind::Dependency
+                | SyntaxKind::BuildTarget
+                | SyntaxKind::Configuration
+                | SyntaxKind::Test
+                | SyntaxKind::EntryPoint
+                | SyntaxKind::ApiEndpoint
+                | SyntaxKind::GeneratedCode => {}
             }
         }
     }

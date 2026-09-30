@@ -203,3 +203,79 @@ fn analyze(repo: &TempRepo) -> codeate_core::AnalysisResult {
     let repository = detect_languages(&repository, &registry).expect("detect succeeds");
     analyze_repository(&repository).expect("analysis succeeds")
 }
+
+/// Phase 17.1 task 7: extend the Rust/Python cross-adapter fixture with an
+/// equivalent Go one. Go's `IMPLEMENTS` is structurally inferred (no
+/// `impl`/`implements` keyword) but resolved repository-wide the same way
+/// Rust's explicit `impl Trait for Type` is, so the *query behavior* for
+/// interface satisfaction matches Rust/Python's `IMPLEMENTS`/`EXTENDS`
+/// exactly, including across files.
+///
+/// The fixture deliberately does NOT extend the IMPORTS/DEPENDS_ON
+/// assertions the Rust/Python test makes: in Go, files in the same package
+/// see each other's top-level declarations directly, with no import
+/// statement -- unlike Rust's `use crate::...` or Python's `from ... import
+/// ...`, there is no IMPORTS edge for Codeate to produce between shape.go
+/// and circle.go, and no cross-file dependency for the pipeline's
+/// import-derived DEPENDS_ON collapsing (`resolve::resolve_depends_on`) to
+/// find. This is a real semantic difference in Go's module system, not a
+/// gap in the adapter -- so `helper`'s call site stays in the same file as
+/// its declaration here too, matching the Rust/Python fixtures' own known
+/// same-file-call limitation.
+#[test]
+fn go_adapter_produces_equivalent_implements_query_behavior_to_rust_and_python() {
+    let go_repo = TempRepo::new(&[
+        (
+            "shape.go",
+            "package main\n\ntype Shape interface {\n\tArea() float64\n}\n",
+        ),
+        (
+            "circle.go",
+            "package main\n\ntype Circle struct{}\n\nfunc (c *Circle) Area() float64 {\n\treturn helper()\n}\n\nfunc helper() float64 {\n\treturn 0\n}\n",
+        ),
+    ]);
+
+    let go_result = analyze(&go_repo);
+    let (go_graph, go_report) = Graph::build(
+        go_result.syntax_entities.clone(),
+        go_result.symbols.clone(),
+        go_result.edges.clone(),
+    );
+    assert!(go_report.is_clean());
+
+    let go_engine = QueryEngine::new(&go_graph);
+
+    // Structural relationship: Circle satisfies Shape across files, exactly
+    // as Rust's cross-file IMPLEMENTS and Python's cross-file EXTENDS do.
+    let go_shape = go_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("Go Shape symbol");
+    let go_impact = go_engine.impact_of(&go_shape.id);
+    assert!(
+        go_impact
+            .iter()
+            .any(|id| go_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "Go: Circle should be in Shape's impact set via structural IMPLEMENTS"
+    );
+
+    // Same-file call: Circle.Area calls helper (both declared in circle.go).
+    let go_helper = go_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("Go helper symbol");
+    let go_callers = go_engine.callers_of(&go_helper.id);
+    assert!(
+        go_callers.iter().any(|s| s.name == "Area"),
+        "Go: Area should call helper"
+    );
+
+    for kind in [EdgeKind::Calls, EdgeKind::References, EdgeKind::Implements] {
+        assert!(
+            go_result.edges.iter().any(|e| e.kind == kind),
+            "Go: expected at least one {kind:?} edge"
+        );
+    }
+}

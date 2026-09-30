@@ -527,3 +527,80 @@ fn java_adapter_produces_equivalent_implements_query_behavior_to_rust_python_and
         );
     }
 }
+
+/// Phase 17.6 task 7: extend the fixture with a Kotlin one. Kotlin's
+/// grammar makes no syntactic distinction between a class's "extends" and an
+/// interface's "implements" relation -- both are just a `: SuperType` entry
+/// in the same `delegation_specifiers` list -- so this fixture exercises a
+/// class satisfying an interface via a bare (non-call) `: Shape` entry,
+/// which `adapters::kotlin::resolve_structural` resolves into the same
+/// `IMPLEMENTS` edge kind Java's explicit `implements` keyword produces, and
+/// which is resolved repository-wide (`Shape` lives in a different file from
+/// `Circle`) exactly like every other adapter in this suite. Also exercises
+/// the cross-file `IMPORTS` path via Kotlin's explicit `import`, resolving
+/// to an external-package placeholder the same way Java's own `import`
+/// does (Codeate doesn't resolve Kotlin import paths against repository
+/// files any more than it does Java's).
+#[test]
+fn kotlin_adapter_produces_equivalent_implements_query_behavior_to_java_rust_python_and_go() {
+    let kotlin_repo = TempRepo::new(&[
+        ("Shape.kt", "interface Shape {\n    fun area(): Double\n}\n"),
+        (
+            "Circle.kt",
+            "import shapes.Shape\n\nclass Circle : Shape {\n    override fun area(): Double {\n        return helper()\n    }\n\n    fun helper(): Double {\n        return 0.0\n    }\n}\n",
+        ),
+    ]);
+
+    let kotlin_result = analyze(&kotlin_repo);
+    let (kotlin_graph, kotlin_report) = Graph::build(
+        kotlin_result.syntax_entities.clone(),
+        kotlin_result.symbols.clone(),
+        kotlin_result.edges.clone(),
+    );
+    assert!(kotlin_report.is_clean());
+
+    let kotlin_engine = QueryEngine::new(&kotlin_graph);
+
+    // Structural relationship: Circle satisfies Shape across files, exactly
+    // as Java's cross-file explicit IMPLEMENTS, Rust's cross-file IMPLEMENTS,
+    // Python's cross-file EXTENDS, and Go's cross-file structural IMPLEMENTS
+    // all do.
+    let kotlin_shape = kotlin_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("Kotlin Shape symbol");
+    let kotlin_impact = kotlin_engine.impact_of(&kotlin_shape.id);
+    assert!(
+        kotlin_impact
+            .iter()
+            .any(|id| kotlin_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "Kotlin: Circle should be in Shape's impact set via explicit IMPLEMENTS"
+    );
+
+    // Same-file call: Circle.area calls helper (both declared in Circle.kt,
+    // matching the same-file-call limitation every other fixture in this
+    // suite already documents for its own adapter's scope-tree reach).
+    let kotlin_helper = kotlin_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("Kotlin helper symbol");
+    let kotlin_callers = kotlin_engine.callers_of(&kotlin_helper.id);
+    assert!(
+        kotlin_callers.iter().any(|s| s.name == "area"),
+        "Kotlin: area should call helper"
+    );
+
+    for kind in [
+        EdgeKind::Calls,
+        EdgeKind::References,
+        EdgeKind::Implements,
+        EdgeKind::Imports,
+    ] {
+        assert!(
+            kotlin_result.edges.iter().any(|e| e.kind == kind),
+            "Kotlin: expected at least one {kind:?} edge"
+        );
+    }
+}

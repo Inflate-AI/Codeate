@@ -3,16 +3,58 @@
 Task breakdown for the **current phase only**. Cleared/archived when the phase closes
 (its summary moves to `CHANGELOG.md`).
 
-## Current phase: Phase 17 — Additional Language Adapters
+## Current phase: Phase 18 — 1.0.0 Beta Hardening & Release
 
-See `ROADMAP.md` Phase 17 for the full required set and closing condition (every
-language/format supported by Graphify + Code Review Graph, union researched
-2026-09-30). This phase is a queue of 32 sub-phases, each planned/approved/implemented/
-closed independently, same shape as Phase 15.
+See `ROADMAP.md` Phase 18. Moved up ahead of Phase 17's remaining language adapters by
+explicit user request on 2026-09-30 — Phase 17 is paused (not closed) after 17.1 (Go)
+and resumes once this phase closes. Draft task breakdown below, **pending approval**
+before implementation starts (per `CLAUDE.md` workflow step 2).
 
-### Sub-phase queue
+### Proposed sub-areas (each independently testable, same closing discipline as a
+language sub-phase: planned → TDD → Happenings → closed with its own commits)
 
-**Tier 1 — mainstream general-purpose**
+- [ ] 18.1 **Performance benchmarking.** Pick/vendor 1-2 real-world repos per
+  supported language (Rust, Python, Go) at meaningful scale. Benchmark harness
+  (`criterion` or hand-rolled timing in the CLI) covering ingest, full analyze,
+  incremental analyze, and representative queries. Record baseline numbers
+  committed to the repo so future phases can catch regressions.
+- [ ] 18.2 **Correctness/robustness hardening.** Malformed/edge-case input handling
+  across all 3 adapters (truncated files, syntax errors, encoding issues, huge
+  single files, deeply nested structures). Property-based or fuzz testing
+  (`proptest`/`cargo-fuzz`) where it fits the determinism guarantee — same fuzzed
+  input must always produce the same output, crash-free.
+- [ ] 18.3 **Documentation.** Architecture doc (how ingestion → detection → adapters
+  → resolution → graph → store → query fit together), an adapter-authoring guide
+  (concrete enough that Phase 17's resumed language work can follow it without
+  reverse-engineering existing adapters), query API reference (Phase 11/16
+  surface), CLI usage docs.
+- [ ] 18.4 **Packaging/distribution.** crates.io publish readiness (crate
+  metadata: description, license, repository links, keywords for
+  `codeate-core`/`codeate-cli`/`codeate-api`), binary release process (target
+  platforms, build/release workflow).
+- [ ] 18.5 **Dependency/security audit.** `cargo audit` (or equivalent) across the
+  workspace; resolve or explicitly accept-and-document any findings.
+- [ ] 18.6 **CI.** Automate `cargo test` + `cargo clippy -- -D warnings` on every
+  push/PR, covering all 3 language adapters; extends Phase 0's local check script
+  rather than replacing it.
+- [ ] 18.7 **Versioning policy.** Formal SemVer policy for the canonical model,
+  storage format, and `codeate-api`'s public surface (extends Phase 16's policy);
+  explicit statement of what "1.0.0 beta" commits to vs. what can still change
+  before a stable 1.0.0.
+
+Each sub-area gets its own concrete task list (mirroring 17.1's shape) once you confirm
+this breakdown and its ordering — flag now if any should be reordered, merged, dropped,
+or if scope within one is off before I start planning 18.1 in detail.
+
+---
+
+## Deferred: Phase 17 — Additional Language Adapters (paused after 17.1)
+
+Full required set and rationale in `ROADMAP.md` Phase 17. Resumes after Phase 18 closes.
+Tier 4 (template/config formats) has been dropped from scope entirely per user decision
+on 2026-09-30.
+
+**Tier 1 — mainstream general-purpose** (12 remaining)
 - [x] 17.1 Go
 - [ ] 17.2 TypeScript
 - [ ] 17.3 JavaScript
@@ -48,58 +90,3 @@ closed independently, same shape as Phase 15.
 - [ ] 17.29 GDScript
 - [ ] 17.30 ReScript
 - [ ] 17.31 Luau
-
-**Tier 4 — template/config formats (depend on a Tier 1/2 adapter)**
-- [ ] 17.32 Vue SFC (needs TypeScript, 17.2)
-- [ ] 17.33 Svelte SFC (needs TypeScript, 17.2)
-- [ ] 17.34 Astro (needs TypeScript, 17.2)
-- [ ] 17.35 Blade templates (needs PHP, 17.10)
-- [ ] 17.36 Ansible YAML
-- [ ] 17.37 Terraform/OpenTofu (`.tf`)
-- [ ] 17.38 Jupyter/Databricks notebooks (`.ipynb`)
-- [ ] 17.39 Spring Boot config (needs Java, 17.4)
-- [ ] 17.40 Perl XS (`.xs`, needs Perl, 17.17)
-
----
-
-### Sub-phase 17.1 — Go (closed -- see `CHANGELOG.md`)
-
-*Same shape as Phase 15: prove the pattern generalizes to a third, C-family-syntax
-language via `tree-sitter` rather than a hand-rolled or `syn`-style parser — the first
-tree-sitter-based adapter, which the rest of the queue reuses.*
-
-1. **Parser integration.** Add `tree-sitter` + `tree-sitter-go` to the Go adapter crate.
-   Confirm parser produces a walkable AST for a representative fixture (packages,
-   structs, interfaces, functions, methods, goroutines-as-statements, multiple return
-   values).
-   - Failing test: parse a minimal fixture, assert non-empty AST root — scaffolding,
-     no behavior to TDD beyond "it parses."
-2. **AST extractor → canonical syntax entities.** Map Go constructs onto Phase 3's
-   model: `File` → package clause, `Struct` (Go structs), `Interface` (Go interfaces),
-   `Function`/`Method` (methods keyed by receiver), `Parameter` (incl. multiple returns
-   — canonical-model gap check: does `Function`/`Method` support multiple return
-   `Type`s today? If not, fix Phase 3's model, don't work around it here),
-   `Variable`, top-level `Statement`/`Expression`.
-   - Golden-file tests per construct, mirroring Phase 4/15's fixture-based approach.
-3. **Symbol resolution.** Wire Go into Phase 5's `build_symbol_table`/`ScopeTree`
-   (expected language-agnostic and unchanged, per Phase 15's finding) — package-level
-   scope, function/block scope, Go's implicit `:=` short variable declarations handled
-   deterministically (shadowing rules match Go's actual scoping, not Rust's/Python's).
-4. **Type resolution.** Primitives, structs, interfaces, generics (Go 1.18+ type
-   parameters), and Go's implicit interface satisfaction (a type implements an
-   interface by having the right methods, no `implements` keyword) — this is the one
-   place Go's semantics diverge most from Rust/Python; needs explicit test coverage.
-5. **Reference & call resolution.** `REFERENCES`, `CALLS` edges; method calls resolved
-   through both explicit receivers and embedded-struct promotion (Go's structural
-   "inheritance").
-6. **Structural relationships.** `IMPLEMENTS` for implicit interface satisfaction
-   (derived, not declared — mark these edges as inferred vs. explicit if the model
-   distinguishes that), `IMPORTS`/`EXPORTS`/`DEPENDS_ON` from Go's import paths and
-   capitalization-based exported-identifier convention.
-7. **Cross-adapter test.** Extend Phase 15's Rust+Python cross-adapter fixture set with
-   a Go fixture repo; identical query behavior for equivalent constructs across all
-   three languages.
-
-Tiers 2-4 and the remaining Tier 1 languages are not broken into concrete tasks yet —
-each sub-phase gets its own planning pass (parser crate selection, canonical-model gap
-check, task breakdown) when it's picked up, per the workflow in `CLAUDE.md`.

@@ -300,23 +300,35 @@ agents, other developer systems), per README's "Codeate as Infrastructure".
 ---
 
 ## Phase 17 — Additional Language Adapters
-**Status:** in progress (17.1 Go closed; see `CHANGELOG.md` and `TASKS.md`)
+**Status:** paused after 17.1 (Go closed; see `CHANGELOG.md` and `TASKS.md`) —
+resumes after Phase 18 closes, per explicit user reorder on 2026-09-30
 
 *Architecture stage: Language Adapters (breadth).*
 
 Expand language coverage, one adapter at a time, reusing the Phase 4/15 pattern.
-**Closing condition for this phase:** Codeate has a `LanguageAdapter` for every language
-and format supported by **Graphify** (`Graphify-Labs/graphify`) and **Code Review Graph**
-(`tirth8205/code-review-graph`), the two reference tools this requirement is scoped
-against. Their union, researched 2026-09-30 by reading each project's own README, is the
-required set below — this phase does not close, and Phase 18 does not start, until every
-item's sub-phase is `done`. (Rust and Python are already covered by Phases 4 and 15.)
+**Closing condition for this phase:** Codeate has a `LanguageAdapter` for every
+general-purpose language supported by **Graphify** (`Graphify-Labs/graphify`) and
+**Code Review Graph** (`tirth8205/code-review-graph`), the two reference tools this
+requirement is scoped against. Their union, researched 2026-09-30 by reading each
+project's own README, is the required set below. (Rust and Python are already covered
+by Phases 4 and 15; Go by 17.1.)
 
-Required set, in implementation order (dependency-ordered: general-purpose languages
-before the template/config formats layered on top of them):
+Template/config formats (Vue/Svelte/Astro SFCs, Blade, Ansible YAML, Terraform, Jupyter
+notebooks, Spring Boot config, Perl XS) are **out of scope** — dropped by explicit user
+decision on 2026-09-30. Only general-purpose languages with their own symbols/types/
+calls count toward this phase's closing condition.
+
+**Sequencing:** work paused immediately after 17.1 (Go) so Phase 18 (1.0.0 beta
+hardening) could start next, by explicit user request on 2026-09-30 — a deliberate
+exception to `CLAUDE.md`'s normal "don't start the next phase until the current one
+closes" rule, authorized here rather than assumed. Phase 17 is not closed, just paused:
+its remaining required set below still stands and resumes once Phase 18 closes.
+
+Required set, in implementation order:
 
 **Tier 1 — mainstream general-purpose:**
-Go, TypeScript, JavaScript, Java, C#, Kotlin, C, C++, Ruby, PHP, Swift, Scala, Dart
+~~Go~~ (17.1, done), TypeScript, JavaScript, Java, C#, Kotlin, C, C++, Ruby, PHP, Swift,
+Scala, Dart
 
 **Tier 2 — scripting / data / infra:**
 SQL, Shell (bash/sh), PowerShell, Perl, Lua, R, Julia
@@ -325,38 +337,38 @@ SQL, Shell (bash/sh), PowerShell, Perl, Lua, R, Julia
 VB.NET, Objective-C, Elixir, Solidity, Zig, Verilog, SystemVerilog, Nix, GDScript,
 ReScript, Luau
 
-**Tier 4 — template/config formats (each depends on a Tier 1/2 adapter):**
-Vue SFC (needs TypeScript), Svelte SFC (needs TypeScript), Astro (needs TypeScript),
-Blade templates (needs PHP), Ansible YAML, Terraform/OpenTofu (`.tf`), Jupyter/Databricks
-notebooks (`.ipynb`), Spring Boot config (`application.properties`/`.yml`, needs Java),
-Perl XS (`.xs`, needs Perl)
-
-Per-language/format sub-phases:
+Per-language sub-phases:
 
 - Each item is its own sub-phase with the same shape as Phase 15: planned (parser crate
   identified, canonical-model gaps noted), approved via its `TASKS.md` breakdown, TDD
   implementation, Happenings review, and closed independently with its own commits.
-- Tier 4 items are not full `LanguageAdapter`s in the Phase 4 sense (they're
-  templates/config wrapping or adjacent to a host language) — each one's sub-phase plan
-  states explicitly how it maps onto the canonical model (e.g. embedded-language
-  extraction for Vue/Svelte/Astro SFCs, or a reduced entity set for config formats)
-  before implementation starts, with any canonical-model gaps fixed in Phase 3's model
-  rather than worked around in the adapter.
 - `TASKS.md` tracks the full sub-phase queue plus the current sub-phase's concrete task
   breakdown; ROADMAP is updated to check off each sub-phase as it closes.
 
 ---
 
-## Phase 18 — Hardening & Release
-**Status:** planned
+## Phase 18 — 1.0.0 Beta Hardening & Release
+**Status:** planned (task breakdown pending — see `TASKS.md`)
 
-Production-readiness pass once the core pipeline and a handful of language adapters
-are stable.
+Production-readiness pass, moved up ahead of Phase 17's remaining language adapters by
+explicit user request on 2026-09-30: get the 3-language core (Rust, Python, Go) to a
+1.0.0 beta-quality bar before adding further language breadth.
 
-- Performance benchmarking on large real-world repositories.
-- Documentation: architecture docs, adapter-authoring guide, query API reference.
-- Packaging/distribution (crates.io, binary releases).
-- Semantic versioning policy for the canonical model, storage format, and API.
+- Performance benchmarking on large real-world repositories (all 3 supported
+  languages), with recorded baselines to catch regressions.
+- Correctness/robustness hardening: malformed/edge-case input handling across all 3
+  adapters, fuzz or property-based testing where it fits the deterministic-output
+  guarantee.
+- Documentation: architecture docs, adapter-authoring guide (so Phase 17's resumed
+  language work has a written pattern to follow, not just prior adapters to imitate),
+  query API reference, CLI usage docs.
+- Packaging/distribution: crates.io publish readiness, binary release process.
+- Dependency/security audit (`cargo audit` or equivalent) across the workspace.
+- CI: automated `cargo test` + `cargo clippy` (extending Phase 0's local check script)
+  on every push, covering all 3 language adapters.
+- Semantic versioning policy for the canonical model, storage format, and
+  `codeate-api`'s public surface (extends Phase 16's SemVer policy), plus what "1.0.0
+  beta" itself commits to vs. what can still change before a stable 1.0.0.
 
 ---
 
@@ -367,6 +379,9 @@ are stable.
 - Phase 15 is the first real test of the "language-agnostic" design principle; phases
   before it must not bake in Rust-specific assumptions.
 - Phase 17's required-language set is fixed (see above) to the union of Graphify's and
-  Code Review Graph's supported languages/formats — not open-ended. If either reference
+  Code Review Graph's general-purpose languages — not open-ended. If either reference
   tool adds languages before Phase 17 closes, re-run the research and get user approval
   before expanding the required set further.
+- Phase 17 is deliberately paused (not closed) after 17.1 so Phase 18 could move up;
+  this is a one-time, explicitly authorized reorder, not a standing precedent for
+  skipping phase-closure discipline elsewhere.

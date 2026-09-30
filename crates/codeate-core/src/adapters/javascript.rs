@@ -135,7 +135,7 @@ impl LanguageAdapter for JavaScriptAdapter {
         }
 
         let (import_symbols, import_edges) =
-            resolve_imports(&sites.imports, &ast.source, module_symbol, all_entities, symbol_table);
+            resolve_imports(&sites, &ast.source, module_symbol, all_entities, symbol_table);
         symbols.extend(import_symbols);
         edges.extend(import_edges);
 
@@ -166,6 +166,10 @@ struct ResolutionSites<'a> {
     imports: Vec<Node<'a>>,
     exports: Vec<Node<'a>>,
     commonjs_exports: Vec<Node<'a>>,
+    /// Each top-level `const/let/var <name> = require("<path>")` (or
+    /// destructured `const { a, b } = require("<path>")`) declarator,
+    /// paired with the string node holding `require`'s path argument.
+    requires: Vec<(Node<'a>, Node<'a>)>,
 }
 
 fn text<'a>(node: Node<'_>, src: &'a str) -> &'a str {
@@ -254,7 +258,8 @@ fn extract_top_level_statement<'a>(
             extract_function(node, src, parent, scope, entities, edges, sites)
         }
         "lexical_declaration" | "variable_declaration" => {
-            extract_top_level_variables(node, src, parent, scope, entities, edges)
+            extract_top_level_variables(node, src, parent, scope, entities, edges);
+            collect_require_sites(node, src, sites);
         }
         "import_statement" => sites.imports.push(node),
         "export_statement" => {
@@ -360,6 +365,53 @@ fn declarator_names(node: Node) -> Vec<Node> {
         }
     }
     names
+}
+
+/// Record each `require("<path>")` call at the top level of a
+/// `lexical_declaration`/`variable_declaration`'s own declarator values
+/// (`const shape = require("./shape")`, `const { a, b } = require("./x")`)
+/// into `sites.requires`, paired with the require call's string argument.
+/// The declared binding itself is already extracted as an ordinary
+/// `Variable` entity by `extract_top_level_variables` -- this only records
+/// the extra information `resolve_imports` needs to also treat it as an
+/// import site.
+fn collect_require_sites<'a>(node: Node<'a>, src: &str, sites: &mut ResolutionSites<'a>) {
+    let mut cursor = node.walk();
+    for declarator in node.children(&mut cursor) {
+        if declarator.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(value) = declarator.child_by_field_name("value") else {
+            continue;
+        };
+        if let Some(path_node) = require_call_path(value, src) {
+            sites.requires.push((declarator, path_node));
+        }
+    }
+}
+
+/// If `node` is a `require("<path>")` call expression (exactly one string
+/// argument, callee named literally `require`), the `string` node holding
+/// its path argument.
+fn require_call_path<'a>(node: Node<'a>, src: &str) -> Option<Node<'a>> {
+    if node.kind() != "call_expression" {
+        return None;
+    }
+    let func = node.child_by_field_name("function")?;
+    if func.kind() != "identifier" || text(func, src) != "require" {
+        return None;
+    }
+    let args = node.child_by_field_name("arguments")?;
+    let mut cursor = args.walk();
+    let mut named = args.named_children(&mut cursor);
+    let first = named.next()?;
+    if named.next().is_some() {
+        return None; // more than one argument -- not a plain require(path)
+    }
+    if first.kind() != "string" {
+        return None;
+    }
+    Some(first)
 }
 
 /// An ES6 `class` declaration becomes a `Class` entity; its `method_definition`
@@ -842,7 +894,7 @@ const IMPORTABLE_KINDS: [SyntaxKind; 3] =
 /// name-based best-effort search); only when nothing matches does it fall
 /// back to an explicit `external-module` placeholder.
 fn resolve_imports(
-    imports: &[Node],
+    sites: &ResolutionSites,
     src: &str,
     module_symbol: &SymbolEntity,
     all_entities: &[SyntaxEntity],
@@ -851,7 +903,7 @@ fn resolve_imports(
     let mut symbols = Vec::new();
     let mut edges = Vec::new();
 
-    for import in imports {
+    for import in &sites.imports {
         let source_path = import
             .child_by_field_name("source")
             .map(|n| text(n, src).trim_matches('"').trim_matches('\'').to_string())
@@ -880,7 +932,59 @@ fn resolve_imports(
         }
     }
 
+    for (declarator, path_node) in &sites.requires {
+        let source_path = text(*path_node, src).trim_matches('"').trim_matches('\'').to_string();
+        for name in require_binding_names(*declarator, src) {
+            bind_import(
+                &name,
+                &source_path,
+                module_symbol,
+                all_entities,
+                symbol_table,
+                &mut symbols,
+                &mut edges,
+            );
+        }
+    }
+
     (symbols, edges)
+}
+
+/// The bound name(s) of a `require(...)` declarator: `const shape =
+/// require(...)` binds `shape`; `const { a, b } = require(...)` binds `a`
+/// and `b` (each destructured property's shorthand/keyed identifier -- a
+/// renamed/computed property is a documented gap, matching
+/// `commonjs_export_names`'s own object-literal handling). An array-
+/// destructured require (`const [a] = require(...)`, unusual but legal) is
+/// also a documented gap.
+fn require_binding_names(declarator: Node, src: &str) -> Vec<String> {
+    let Some(name) = declarator.child_by_field_name("name") else {
+        return Vec::new();
+    };
+    match name.kind() {
+        "identifier" => vec![text(name, src).to_string()],
+        "object_pattern" => {
+            let mut names = Vec::new();
+            let mut cursor = name.walk();
+            for property in name.children(&mut cursor) {
+                match property.kind() {
+                    "shorthand_property_identifier_pattern" => {
+                        names.push(text(property, src).to_string())
+                    }
+                    "pair_pattern" => {
+                        if let Some(value) = property.child_by_field_name("value") {
+                            if value.kind() == "identifier" {
+                                names.push(text(value, src).to_string());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            names
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn bind_import(
@@ -1502,7 +1606,7 @@ mod tests {
         );
 
         let (_, edges) =
-            resolve_imports(&sites.imports, &import_ast.source, &module_symbol, &entities, &symbol_table);
+            resolve_imports(&sites, &import_ast.source, &module_symbol, &entities, &symbol_table);
 
         let shape = entities.iter().find(|e| e.kind == SyntaxKind::Class).unwrap();
         let shape_symbol = symbol_table.find_by_syntax_id(&shape.id).unwrap();
@@ -1531,7 +1635,7 @@ mod tests {
         );
 
         let (symbols, edges) =
-            resolve_imports(&sites.imports, &import_ast.source, &module_symbol, &[], &symbol_table);
+            resolve_imports(&sites, &import_ast.source, &module_symbol, &[], &symbol_table);
 
         assert!(symbols.iter().any(|s| s.name.starts_with("external-module")));
         assert!(edges.iter().any(|e| e.kind == EdgeKind::Imports));
@@ -1559,24 +1663,83 @@ mod tests {
         );
 
         let (symbols, edges) =
-            resolve_imports(&sites.imports, &import_ast.source, &module_symbol, &[], &symbol_table);
+            resolve_imports(&sites, &import_ast.source, &module_symbol, &[], &symbol_table);
 
         assert!(symbols.iter().any(|s| s.name.contains("react::React")));
         assert!(edges.iter().any(|e| e.kind == EdgeKind::Imports));
     }
 
     #[test]
-    fn a_commonjs_require_is_recognized_as_an_import_site() {
+    fn a_commonjs_require_binds_its_local_name_and_produces_an_imports_edge() {
+        let source = "class Shape {\n}\n";
         let adapter = JavaScriptAdapter;
-        let source = "const shape = require(\"./shape\");\n";
         let ast = adapter.parse(source).unwrap();
-        let (entities, _) = adapter.extract(&ast, "circle.js");
-        // `require` isn't specially recognized as an import binding by this
-        // adapter (a documented gap -- unlike `import`, `require`'s bound
-        // name doesn't get resolved/searched the same way); the assignment
-        // still produces an ordinary top-level `Variable` entity for
-        // `shape`, which is what's asserted here.
-        assert!(entities.iter().any(|e| e.kind == SyntaxKind::Variable && e.name == "shape"));
+        let (entities, _) = adapter.extract(&ast, "shape.js");
+        let symbol_table = crate::symbols::build_symbol_table(&entities);
+        let module_symbol = symbol_table.find_by_syntax_id(&entities[0].id).unwrap().clone();
+
+        let require_source = "const Shape = require(\"./shape\");\n";
+        let require_ast = adapter.parse(require_source).unwrap();
+        let (require_entities, _) = adapter.extract(&require_ast, "circle.js");
+        // The `require(...)` call site still also produces an ordinary
+        // top-level `Variable` entity for its binding -- `require` isn't
+        // treated as anything other than a normal call expression by
+        // `extract`, only additionally recorded as an import site.
+        assert!(require_entities
+            .iter()
+            .any(|e| e.kind == SyntaxKind::Variable && e.name == "Shape"));
+
+        let mut sites = ResolutionSites::default();
+        let require_module = require_entities[0].clone();
+        let mut dummy_entities = vec![require_module.clone()];
+        let mut dummy_edges = Vec::new();
+        extract_items(
+            require_ast.tree.root_node(),
+            &require_ast.source,
+            &require_module,
+            "circle.js",
+            &mut dummy_entities,
+            &mut dummy_edges,
+            &mut sites,
+        );
+
+        let (_, edges) =
+            resolve_imports(&sites, &require_ast.source, &module_symbol, &entities, &symbol_table);
+
+        let shape = entities.iter().find(|e| e.kind == SyntaxKind::Class).unwrap();
+        let shape_symbol = symbol_table.find_by_syntax_id(&shape.id).unwrap();
+        assert!(edges.contains(&Edge::new(module_symbol.id.clone(), shape_symbol.id.clone(), EdgeKind::Imports)));
+    }
+
+    #[test]
+    fn a_destructured_require_binds_each_property_name() {
+        let adapter = JavaScriptAdapter;
+        let module = SyntaxEntity::new(SyntaxKind::Module, "module.js", "module.js");
+        let symbol_table = crate::symbols::build_symbol_table(&[module.clone()]);
+        let module_symbol = symbol_table.find_by_syntax_id(&module.id).unwrap().clone();
+
+        let require_ast = adapter
+            .parse("const { readFile, writeFile } = require(\"fs\");\n")
+            .unwrap();
+        let mut sites = ResolutionSites::default();
+        let mut entities = vec![module.clone()];
+        let mut edges = Vec::new();
+        extract_items(
+            require_ast.tree.root_node(),
+            &require_ast.source,
+            &module,
+            "module.js",
+            &mut entities,
+            &mut edges,
+            &mut sites,
+        );
+
+        let (symbols, edges) =
+            resolve_imports(&sites, &require_ast.source, &module_symbol, &[], &symbol_table);
+
+        assert!(symbols.iter().any(|s| s.name.contains("fs::readFile")));
+        assert!(symbols.iter().any(|s| s.name.contains("fs::writeFile")));
+        assert_eq!(edges.iter().filter(|e| e.kind == EdgeKind::Imports).count(), 2);
     }
 
     #[test]

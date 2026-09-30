@@ -527,3 +527,74 @@ fn java_adapter_produces_equivalent_implements_query_behavior_to_rust_python_and
         );
     }
 }
+
+/// Phase 17.5 task 7: extend the fixture with a C# one. C# has no separate
+/// `implements` keyword the way Java does -- `Circle : IShape` uses the same
+/// base-list syntax a base *class* would -- so this exercises
+/// `adapters::csharp::resolve_structural`'s own disambiguation (an
+/// `I`-prefixed, capitalized name with no matching `Class`/`Struct` entity
+/// in the repository resolves as an interface) rather than an explicit
+/// keyword. Once resolved, though, the *query behavior* is identical to
+/// every other adapter's own IMPLEMENTS/EXTENDS: `impact_of` sees no
+/// difference between Java's keyword-driven IMPLEMENTS, Go's structural
+/// inference, and C#'s base-list disambiguation.
+#[test]
+fn csharp_adapter_produces_equivalent_implements_query_behavior_to_java_go_rust_and_python() {
+    let csharp_repo = TempRepo::new(&[
+        (
+            "IShape.cs",
+            "public interface IShape {\n    double Area();\n}\n",
+        ),
+        (
+            "Circle.cs",
+            "public class Circle : IShape {\n    public double Area() {\n        return Helper();\n    }\n\n    double Helper() {\n        return 0;\n    }\n}\n",
+        ),
+    ]);
+
+    let csharp_result = analyze(&csharp_repo);
+    let (csharp_graph, csharp_report) = Graph::build(
+        csharp_result.syntax_entities.clone(),
+        csharp_result.symbols.clone(),
+        csharp_result.edges.clone(),
+    );
+    assert!(csharp_report.is_clean());
+
+    let csharp_engine = QueryEngine::new(&csharp_graph);
+
+    // Structural relationship: Circle satisfies IShape across files, exactly
+    // as Java's cross-file explicit IMPLEMENTS, Go's cross-file structural
+    // IMPLEMENTS, and Rust's/Python's cross-file IMPLEMENTS/EXTENDS all do.
+    let csharp_shape = csharp_engine
+        .symbols_named("IShape")
+        .into_iter()
+        .next()
+        .expect("C# IShape symbol");
+    let csharp_impact = csharp_engine.impact_of(&csharp_shape.id);
+    assert!(
+        csharp_impact
+            .iter()
+            .any(|id| csharp_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "C#: Circle should be in IShape's impact set via disambiguated IMPLEMENTS"
+    );
+
+    // Same-file call: Circle.Area calls Helper (both declared in Circle.cs,
+    // matching the same-file-call limitation the Rust/Python/Go/Java
+    // fixtures already document for their own adapters' scope-tree reach).
+    let csharp_helper = csharp_engine
+        .symbols_named("Helper")
+        .into_iter()
+        .next()
+        .expect("C# Helper symbol");
+    let csharp_callers = csharp_engine.callers_of(&csharp_helper.id);
+    assert!(
+        csharp_callers.iter().any(|s| s.name == "Area"),
+        "C#: Area should call Helper"
+    );
+
+    for kind in [EdgeKind::Calls, EdgeKind::References, EdgeKind::Implements] {
+        assert!(
+            csharp_result.edges.iter().any(|e| e.kind == kind),
+            "C#: expected at least one {kind:?} edge"
+        );
+    }
+}

@@ -28,6 +28,80 @@ impl LanguageAdapter for RustAdapter {
         let mut sites = ResolutionSites::default();
         extract_with_sites(ast, location, &mut sites)
     }
+
+    fn resolve_file(
+        &self,
+        ast: &Self::Ast,
+        location: &str,
+        all_entities: &[SyntaxEntity],
+        symbol_table: &SymbolTable,
+        edges_so_far: &[Edge],
+        module_symbol: &SymbolEntity,
+        file_module: &SyntaxEntity,
+    ) -> (Vec<SymbolEntity>, Vec<Edge>) {
+        // Re-derive the resolution sites (bodies, impls, traits,
+        // trait-impl-methods) this file's extraction visited -- `extract`
+        // already returned this file's entities/edges to the caller, so
+        // only `sites` (which borrow into `ast`) is needed here.
+        let mut sites = ResolutionSites::default();
+        let (file_entities, _file_edges) = extract_with_sites(ast, location, &mut sites);
+
+        let scope_tree = ScopeTree::build(file_module, &file_entities, edges_so_far);
+
+        let mut new_symbols: Vec<SymbolEntity> = Vec::new();
+        let mut new_edges: Vec<Edge> = Vec::new();
+
+        for (fn_entity, block, _scope) in &sites.bodies {
+            let Some(fn_symbol) = symbol_table.find_by_syntax_id(&fn_entity.id).cloned() else {
+                continue;
+            };
+            let Some(scope) = scope_tree.scope_of(&fn_entity.id) else {
+                continue;
+            };
+            let (symbols, edges) =
+                resolve_body(block, &fn_symbol, &scope_tree, scope, symbol_table);
+            new_symbols.extend(symbols);
+            new_edges.extend(edges);
+        }
+
+        for item_impl in sites.impls.iter().copied() {
+            let (symbols, edges) = resolve_implements(item_impl, all_entities, symbol_table);
+            new_symbols.extend(symbols);
+            new_edges.extend(edges);
+        }
+
+        for item_trait in sites.traits.iter().copied() {
+            let (symbols, edges) = resolve_supertraits(item_trait, all_entities, symbol_table);
+            new_symbols.extend(symbols);
+            new_edges.extend(edges);
+        }
+
+        for (method_entity, trait_name) in &sites.trait_impl_methods {
+            let Some(method_symbol) = symbol_table.find_by_syntax_id(&method_entity.id).cloned()
+            else {
+                continue;
+            };
+            let (symbols, edges) = resolve_overrides(
+                &method_entity.name,
+                &method_symbol,
+                trait_name,
+                all_entities,
+                edges_so_far,
+                symbol_table,
+            );
+            new_symbols.extend(symbols);
+            new_edges.extend(edges);
+        }
+
+        let (symbols, edges) = resolve_imports(ast, module_symbol, all_entities, symbol_table);
+        new_symbols.extend(symbols);
+        new_edges.extend(edges);
+
+        let export_edges = resolve_exports(ast, module_symbol, all_entities, symbol_table);
+        new_edges.extend(export_edges);
+
+        (new_symbols, new_edges)
+    }
 }
 
 /// Sites `extract_items` visits that later resolution stages need the raw

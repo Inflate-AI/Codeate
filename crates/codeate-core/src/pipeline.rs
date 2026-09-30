@@ -1,12 +1,7 @@
+use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
-use crate::adapter::LanguageAdapter;
-use crate::adapters::rust::{
-    self, resolve_body, resolve_exports, resolve_implements, resolve_imports, resolve_overrides,
-    resolve_supertraits, ResolutionSites,
-};
-use crate::adapters::RustAdapter;
 use crate::error::Result;
 use crate::graph::Graph;
 use crate::incremental::{affected_files, detect_changes};
@@ -14,7 +9,7 @@ use crate::language::LanguageId;
 use crate::model::{Edge, EdgeKind, EntityId, SymbolEntity, SyntaxEntity};
 use crate::repository::Repository;
 use crate::resolve::resolve_depends_on;
-use crate::symbols::{build_symbol_table, defined_in_edges, ScopeTree};
+use crate::symbols::{build_symbol_table, defined_in_edges};
 
 /// The full canonical entity/edge stream for a repository: syntax entities,
 /// resolved symbols, and every edge kind Phases 3-8 produce, resolved with
@@ -56,24 +51,29 @@ struct CarryIn {
 
 /// Run the full Phase 4-8 pipeline. When `files_filter` is `Some`, only
 /// those paths are parsed and re-resolved; every other file's data comes
-/// from `carry_in` instead. When `files_filter` is `None`, every Rust file
-/// in `repository` is parsed and `carry_in` is expected to be empty (the
-/// full-analysis case).
+/// from `carry_in` instead. When `files_filter` is `None`, every file with a
+/// registered adapter is parsed and `carry_in` is expected to be empty (the
+/// full-analysis case). A file whose language has no registered adapter is
+/// skipped, the same way Phase 2's `LanguageId::Unknown` already is.
 fn run_pipeline(
     repository: &Repository,
     files_filter: Option<&HashSet<String>>,
     carry_in: CarryIn,
 ) -> Result<AnalysisResult> {
-    let adapter = RustAdapter;
-    let rust = LanguageId::known("rust");
+    let adapters = crate::adapters::default_adapters();
 
-    // Parse every Rust file that needs (re-)processing up front and keep the
-    // ASTs alive: later resolution stages (resolve_implements,
-    // resolve_imports, ...) borrow directly into the `syn` AST, not just the
-    // canonical entities derived from it.
-    let mut parsed: Vec<(String, syn::File)> = Vec::new();
+    // Parse every file that needs (re-)processing up front and keep the
+    // ASTs alive: `resolve_file` borrows directly into them, not just the
+    // canonical entities `extract` derives.
+    struct PerFile {
+        path: String,
+        language: LanguageId,
+        ast: Box<dyn Any>,
+    }
+
+    let mut per_file: Vec<PerFile> = Vec::new();
     for file in &repository.files {
-        if file.language != rust {
+        if !adapters.contains_key(&file.language) {
             continue;
         }
         if let Some(filter) = files_filter {
@@ -82,35 +82,33 @@ fn run_pipeline(
             }
         }
         let source = fs::read_to_string(repository.root.join(&file.path))?;
-        parsed.push((file.path.clone(), adapter.parse(&source)?));
+        let adapter = &adapters[&file.language];
+        per_file.push(PerFile {
+            path: file.path.clone(),
+            language: file.language.clone(),
+            ast: adapter.parse_dyn(&source)?,
+        });
     }
 
-    struct PerFile<'a> {
-        path: String,
-        ast: &'a syn::File,
-        entities: Vec<SyntaxEntity>,
-        sites: ResolutionSites<'a>,
-    }
-
-    let mut per_file: Vec<PerFile> = Vec::new();
     let mut all_entities: Vec<SyntaxEntity> = carry_in.entities;
     let mut all_edges: Vec<Edge> = carry_in.structural_edges;
     let mut owner_file: HashMap<EntityId, String> = carry_in.owner_file;
+    // The file's own root module entity, keyed by path -- `extract`'s
+    // contract (see `LanguageAdapter::extract`) guarantees it's always the
+    // first entity a file's own extraction returns.
+    let mut file_module_for: HashMap<String, SyntaxEntity> = HashMap::new();
 
-    for (path, ast) in &parsed {
-        let mut sites = ResolutionSites::default();
-        let (entities, edges) = rust::extract_with_sites(ast, path, &mut sites);
+    for pf in &per_file {
+        let adapter = &adapters[&pf.language];
+        let (entities, edges) = adapter.extract_dyn(pf.ast.as_ref(), &pf.path);
         for entity in &entities {
-            owner_file.insert(entity.id.clone(), path.clone());
+            owner_file.insert(entity.id.clone(), pf.path.clone());
         }
-        all_entities.extend(entities.clone());
+        if let Some(first) = entities.first() {
+            file_module_for.insert(pf.path.clone(), first.clone());
+        }
+        all_entities.extend(entities);
         all_edges.extend(edges);
-        per_file.push(PerFile {
-            path: path.clone(),
-            ast,
-            entities,
-            sites,
-        });
     }
 
     let symbol_table = build_symbol_table(&all_entities);
@@ -142,67 +140,27 @@ fn run_pipeline(
     let mut new_edges: Vec<Edge> = Vec::new();
 
     for pf in &per_file {
-        let file_module = &pf.entities[0];
+        let Some(file_module) = file_module_for.get(&pf.path) else {
+            continue;
+        };
         let Some(module_symbol) = symbol_table.find_by_syntax_id(&file_module.id).cloned() else {
             continue;
         };
-        let scope_tree = ScopeTree::build(file_module, &pf.entities, &all_edges);
-        let mut file_new_symbols: Vec<SymbolEntity> = Vec::new();
-
-        for (fn_entity, block, _scope) in &pf.sites.bodies {
-            let Some(fn_symbol) = symbol_table.find_by_syntax_id(&fn_entity.id).cloned() else {
-                continue;
-            };
-            let Some(scope) = scope_tree.scope_of(&fn_entity.id) else {
-                continue;
-            };
-            let (symbols, edges) =
-                resolve_body(block, &fn_symbol, &scope_tree, scope, &symbol_table);
-            file_new_symbols.extend(symbols);
-            new_edges.extend(edges);
-        }
-
-        for item_impl in pf.sites.impls.iter().copied() {
-            let (symbols, edges) = resolve_implements(item_impl, &all_entities, &symbol_table);
-            file_new_symbols.extend(symbols);
-            new_edges.extend(edges);
-        }
-
-        for item_trait in pf.sites.traits.iter().copied() {
-            let (symbols, edges) = resolve_supertraits(item_trait, &all_entities, &symbol_table);
-            file_new_symbols.extend(symbols);
-            new_edges.extend(edges);
-        }
-
-        for (method_entity, trait_name) in &pf.sites.trait_impl_methods {
-            let Some(method_symbol) = symbol_table.find_by_syntax_id(&method_entity.id).cloned()
-            else {
-                continue;
-            };
-            let (symbols, edges) = resolve_overrides(
-                &method_entity.name,
-                &method_symbol,
-                trait_name,
-                &all_entities,
-                &all_edges,
-                &symbol_table,
-            );
-            file_new_symbols.extend(symbols);
-            new_edges.extend(edges);
-        }
-
-        let (symbols, edges) =
-            resolve_imports(pf.ast, &module_symbol, &all_entities, &symbol_table);
-        file_new_symbols.extend(symbols);
-        new_edges.extend(edges);
-
-        let export_edges = resolve_exports(pf.ast, &module_symbol, &all_entities, &symbol_table);
-        new_edges.extend(export_edges);
-
-        for symbol in &file_new_symbols {
+        let adapter = &adapters[&pf.language];
+        let (symbols, edges) = adapter.resolve_file_dyn(
+            pf.ast.as_ref(),
+            &pf.path,
+            &all_entities,
+            &symbol_table,
+            &all_edges,
+            &module_symbol,
+            file_module,
+        );
+        for symbol in &symbols {
             owner_file.insert(symbol.id.clone(), pf.path.clone());
         }
-        new_symbols.extend(file_new_symbols);
+        new_symbols.extend(symbols);
+        new_edges.extend(edges);
     }
 
     all_symbols.extend(new_symbols);
@@ -221,13 +179,13 @@ fn run_pipeline(
     })
 }
 
-/// Run the full Phase 4-8 pipeline over every Rust file in `repository`:
-/// parse, extract, merge symbol tables repository-wide, then resolve
-/// references/calls/instantiates (per file, task 2-4's scope-based lookup)
-/// and structural relationships (extends/implements/overrides/imports/
-/// exports/depends_on, resolved against the full repository's entities and
-/// merged symbol table). Non-Rust files are skipped: only `RustAdapter`
-/// exists so far (Phase 15+ generalizes this dispatch to other languages).
+/// Run the full Phase 4-8 pipeline over every file in `repository` whose
+/// language has a registered adapter (`adapters::default_adapters`): parse,
+/// extract, merge symbol tables repository-wide, then resolve each file
+/// (references/calls/instantiates/structural relationships, resolved
+/// against the full repository's entities and merged symbol table) through
+/// its own adapter's `LanguageAdapter::resolve_file`. A file whose language
+/// has no registered adapter is skipped, not an error.
 pub fn analyze_repository(repository: &Repository) -> Result<AnalysisResult> {
     run_pipeline(repository, None, CarryIn::default())
 }

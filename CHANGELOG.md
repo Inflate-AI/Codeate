@@ -7,6 +7,123 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 17.7] — C Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.5/17.6 via git worktrees.
+
+### Added
+
+- New C language adapter (`crates/codeate-core/src/adapters/c.rs`), parsing via
+  `tree-sitter`/`tree-sitter-c`.
+- Extraction: `Module` (file), `Struct` (also used for unions -- no dedicated union
+  kind), `Enum`, `Function`/`Parameter`, global/local `Variable`, generic `Statement`.
+  No `Method`/`Class`/`Interface` -- C has no OOP constructs.
+- Symbol/reference/call resolution reuses Phase 5's `ScopeTree`/`SymbolTable`
+  unchanged, confirming it's language-agnostic even for C's flat global/file-scope
+  model.
+- `INSTANTIATES`: a local variable declared with a struct/union-typed initializer list
+  treated as the closest C analog to constructing an aggregate.
+- `EXPORTS` approximated from `static`/`extern`/default linkage.
+- Cross-adapter test extended with a C fixture proving equivalent `callers_of`/CALLS/
+  REFERENCES query behavior against every other adapter (C has no IMPLEMENTS/EXTENDS
+  construct to test equivalence for, so this fixture also asserts their correct
+  absence instead).
+
+### Known gaps / correct absences (documented)
+
+- `EXTENDS`/`IMPLEMENTS` are never produced -- a correct absence (C has no
+  inheritance/interfaces), not a gap, asserted by a dedicated test.
+- `IMPORTS`/`#include` resolution deliberately not attempted: the preprocessor is a
+  separate pass tree-sitter's grammar doesn't run.
+- No `SyntaxKind::Union` -- C unions mapped onto `SyntaxKind::Struct`.
+- No `TypeRef::Function`/`Callable` variant -- function pointers map to
+  `TypeRef::Unresolved` with raw text.
+- Only `.c` is registered for detection, not `.h` (ambiguous with C++, deferred to a
+  future C++ sub-phase).
+
+## [Phase 17.6] — Kotlin Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.5/17.7 via git worktrees.
+
+### Added
+
+- New Kotlin language adapter (`crates/codeate-core/src/adapters/kotlin.rs`), parsing
+  via `tree-sitter-kotlin-ng` -- **a parser substitution from the originally planned
+  `tree-sitter-kotlin`**: that crate pins `tree-sitter >= 0.21, < 0.23` and doesn't
+  type-check against this workspace's `tree-sitter 0.25` (verified by inspecting its
+  Cargo.toml/lib.rs before writing adapter code). `tree-sitter-kotlin-ng` is the
+  actively-maintained fork and a drop-in structural match for the existing
+  `LANGUAGE: LanguageFn` pattern.
+- Extraction: `Class`/`Interface`/`Enum` disambiguated from one grammar node by an
+  `interface` keyword child and by whether the body is an enum-class body. Object
+  declarations and companion objects map to plain `Class` (no dedicated singleton
+  kind). Primary/secondary constructors map to a `Method` named after the class.
+- `: SuperType` entries disambiguated the same way the Kotlin compiler itself does
+  (constructor-call entry -> EXTENDS, bare-type entry -> IMPLEMENTS or EXTENDS
+  depending on the owner), since Kotlin's grammar doesn't distinguish these
+  syntactically the way Java's does.
+- `EXPORTS` reflects Kotlin's default-public convention (opposite of Java's
+  explicit-`public` requirement).
+- Cross-adapter test extended with a Kotlin fixture exercising cross-file IMPLEMENTS
+  and IMPORTS.
+
+### Fixed
+
+- Two bugs caught by the adapter's own unit tests before commit (not gaps -- actual
+  mistakes): `navigation_expression`'s member name was read from the *first*
+  identifier child instead of the *last* (broke receiver-qualified call resolution
+  like `shape.area`); `value_argument` wrapper nodes weren't descended into by the
+  expression walker, so call arguments never produced REFERENCES edges.
+
+### Known gaps (documented, not fixed, following existing precedent)
+
+- Nullable types (`T?`) have no clean `TypeRef` fit (not `Union` -- single type plus
+  an orthogonal nullability flag, not "one of several alternatives"; not
+  `Reference` -- models indirection/mutability, not nullability) -- `extract_type`
+  unwraps to the inner type and drops the `?`.
+- Extension functions are not extracted -- no clean receiver-relationship shape
+  exists in the canonical model for "a function extending a type it doesn't own."
+- Data classes modeled as plain `Class`, no synthesized `equals`/`hashCode`/`copy`.
+- Sealed classes / `when` expressions: structural extraction only, no exhaustiveness
+  checking.
+- Companion objects modeled minimally as a nested `Class` (default name `Companion`
+  when unnamed).
+
+## [Phase 17.5] — C# Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.6/17.7 via git worktrees.
+
+### Added
+
+- New C# language adapter (`crates/codeate-core/src/adapters/csharp.rs`), parsing via
+  `tree-sitter-c-sharp` (C# 1-13 grammar support).
+- Namespaces map onto nested `Module` entities (both block `namespace X { }` and C#10
+  file-scoped `namespace X;` forms). Properties modeled as `Field`
+  (`SyntaxKind::Variable`), not a Method pair -- accessor bodies not decomposed.
+  Records (`record`/`record class`/`record struct`) map onto `Class`, no
+  auto-generated members modeled.
+- Structural relationships: C# uses one `: Base, IInterface` base-list for both
+  superclass and interfaces (unlike Java's separate keywords), so only the base-list's
+  first entry can possibly be a superclass. `resolve_structural` disambiguates by
+  resolving repository-wide (Interface -> Implements, Class/Struct -> Extends), with a
+  documented naming-convention fallback (C#'s `I`-prefix capitalized convention) for
+  unresolved/external types.
+- Enum base-list (`enum Color : byte`) correctly *not* modeled as EXTENDS/IMPLEMENTS --
+  it names the underlying integral type, a different meaning entirely (documented as a
+  correct absence).
+- Nullable types (`string?`) unwrap to their inner `TypeRef` as-is -- confirmed no
+  model change needed.
+- `IMPORTS` from `using` directives (including `using static`/alias forms) resolve to
+  explicit placeholders. `EXPORTS` from the `public` modifier (internal-by-default
+  correctly not exported).
+- Cross-adapter test extended with a C# fixture exercising the base-list
+  disambiguation.
+
+### Known gaps (documented, not fixed, following Java's precedent)
+
+- `TypeRef::Generic` still has nowhere to record a `where T : IComparable<T>` bound --
+  same gap Java's 17.4 already found and left open.
+
 ## [Phase 17.4] — Java Language Adapter
 
 Sub-phase of Phase 17 (Additional Language Adapters), implemented in parallel with

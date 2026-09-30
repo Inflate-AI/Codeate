@@ -300,9 +300,8 @@ agents, other developer systems), per README's "Codeate as Infrastructure".
 ---
 
 ## Phase 17 — Additional Language Adapters
-**Status:** in progress — unpaused 2026-09-30 (17.1 Go, 17.2 TypeScript, 17.3
-JavaScript, 17.4 Java all closed; batch 1 done, batch 2 planning pending, see
-`TASKS.md`)
+**Status:** in progress — unpaused 2026-09-30 (batches 1-2 done: Go, TypeScript,
+JavaScript, Java, C#, Kotlin, C all closed; batch 3 planning pending, see `TASKS.md`)
 
 *Architecture stage: Language Adapters (breadth).*
 
@@ -331,7 +330,8 @@ Required set, in implementation order:
 
 **Tier 1 — mainstream general-purpose:**
 ~~Go~~ (17.1, done), ~~TypeScript~~ (17.2, done), ~~JavaScript~~ (17.3, done),
-~~Java~~ (17.4, done), C#, Kotlin, C, C++, Ruby, PHP, Swift, Scala, Dart
+~~Java~~ (17.4, done), ~~C#~~ (17.5, done), ~~Kotlin~~ (17.6, done), ~~C~~ (17.7,
+done), C++, Ruby, PHP, Swift, Scala, Dart
 
 **Tier 2 — scripting / data / infra:**
 SQL, Shell (bash/sh), PowerShell, Perl, Lua, R, Julia

@@ -197,6 +197,60 @@ fn rust_and_python_adapters_produce_identical_query_behavior_for_equivalent_cons
         .any(|e| e.kind == EdgeKind::Extends));
 }
 
+/// Phase 17.7 task 7: extend the fixture with a C one. C has no interface-
+/// satisfaction construct at all (no classes/interfaces/inheritance -- see
+/// `adapters::c`'s own module doc comment), so unlike every prior fixture in
+/// this file there is no EXTENDS/IMPLEMENTS-equivalence to test. Instead
+/// this fixture proves the same CALLS/REFERENCES query behavior
+/// (`callers_of`) holds for C's free functions as it does for every other
+/// adapter's methods/functions: `compute_area` calls `helper`, same file,
+/// same as the Rust/Python/Go/TypeScript/JavaScript/Java fixtures' own
+/// same-file-call shape.
+#[test]
+fn c_adapter_produces_equivalent_calls_query_behavior_to_every_other_adapter() {
+    let c_repo = TempRepo::new(&[(
+        "shape.c",
+        "struct Circle {\n  double radius;\n};\n\ndouble helper(void) {\n  return 0;\n}\n\ndouble compute_area(struct Circle c) {\n  return helper();\n}\n",
+    )]);
+
+    let c_result = analyze(&c_repo);
+    let (c_graph, c_report) = Graph::build(
+        c_result.syntax_entities.clone(),
+        c_result.symbols.clone(),
+        c_result.edges.clone(),
+    );
+    assert!(c_report.is_clean());
+
+    let c_engine = QueryEngine::new(&c_graph);
+
+    // Same-file call: compute_area calls helper, exactly the same
+    // CALLS/callers_of query shape as every other language's fixture in
+    // this file.
+    let c_helper = c_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("C helper symbol");
+    let c_callers = c_engine.callers_of(&c_helper.id);
+    assert!(
+        c_callers.iter().any(|s| s.name == "compute_area"),
+        "C: compute_area should call helper"
+    );
+
+    for kind in [EdgeKind::Calls, EdgeKind::References] {
+        assert!(
+            c_result.edges.iter().any(|e| e.kind == kind),
+            "C: expected at least one {kind:?} edge"
+        );
+    }
+
+    // The correct absence: no EXTENDS/IMPLEMENTS anywhere in this fixture's
+    // edges -- C has no construct for either, unlike every other adapter
+    // in this suite.
+    assert!(!c_result.edges.iter().any(|e| e.kind == EdgeKind::Extends));
+    assert!(!c_result.edges.iter().any(|e| e.kind == EdgeKind::Implements));
+}
+
 fn analyze(repo: &TempRepo) -> codeate_core::AnalysisResult {
     let repository = ingest(&repo.root).expect("ingest succeeds");
     let registry = default_registry();

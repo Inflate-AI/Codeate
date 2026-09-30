@@ -29,6 +29,9 @@ pub fn default_registry() -> LanguageRegistry {
     registry
         .register(LanguageDescriptor::new(LanguageId::known("java")).with_extensions(["java"]));
     registry.register(
+        LanguageDescriptor::new(LanguageId::known("kotlin")).with_extensions(["kt", "kts"]),
+    );
+    registry.register(
         LanguageDescriptor::new(LanguageId::known("markdown")).with_extensions(["md", "markdown"]),
     );
     registry.register(LanguageDescriptor::new(LanguageId::known("toml")).with_extensions(["toml"]));
@@ -131,6 +134,15 @@ mod tests {
         assert_eq!(
             detect_by_extension(Path::new("src/Main.java"), &registry),
             Some(LanguageId::known("java"))
+        );
+    }
+
+    #[test]
+    fn detects_kotlin_by_extension() {
+        let registry = default_registry();
+        assert_eq!(
+            detect_by_extension(Path::new("src/Main.kt"), &registry),
+            Some(LanguageId::known("kotlin"))
         );
     }
 

@@ -28,6 +28,10 @@ pub fn default_registry() -> LanguageRegistry {
     registry.register(LanguageDescriptor::new(LanguageId::known("go")).with_extensions(["go"]));
     registry
         .register(LanguageDescriptor::new(LanguageId::known("java")).with_extensions(["java"]));
+    // `.c` only, deliberately -- `.h` is ambiguous between C and C++ (a
+    // future sub-phase, 17.8) and isn't registered here, so a header file
+    // detects as Unknown rather than being guessed at.
+    registry.register(LanguageDescriptor::new(LanguageId::known("c")).with_extensions(["c"]));
     registry.register(
         LanguageDescriptor::new(LanguageId::known("markdown")).with_extensions(["md", "markdown"]),
     );
@@ -132,6 +136,23 @@ mod tests {
             detect_by_extension(Path::new("src/Main.java"), &registry),
             Some(LanguageId::known("java"))
         );
+    }
+
+    #[test]
+    fn detects_c_by_extension() {
+        let registry = default_registry();
+        assert_eq!(
+            detect_by_extension(Path::new("src/main.c"), &registry),
+            Some(LanguageId::known("c"))
+        );
+    }
+
+    #[test]
+    fn does_not_detect_a_header_file_as_c() {
+        // `.h` is ambiguous between C and C++ (a future sub-phase) -- not
+        // registered, so it stays Unknown rather than being guessed at.
+        let registry = default_registry();
+        assert_eq!(detect_by_extension(Path::new("include/shape.h"), &registry), None);
     }
 
     #[test]

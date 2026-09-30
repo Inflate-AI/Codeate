@@ -279,3 +279,74 @@ fn go_adapter_produces_equivalent_implements_query_behavior_to_rust_and_python()
         );
     }
 }
+
+/// Phase 17.4 task 7: extend the fixture with a Java one. Java's
+/// `IMPLEMENTS` is read directly off the explicit `implements` keyword (no
+/// method-set comparison, unlike Go's structural inference) but resolved
+/// repository-wide the same way -- so the *query behavior* for interface
+/// satisfaction matches Rust's explicit `impl Trait for Type`, Python's
+/// `EXTENDS`, and Go's structural `IMPLEMENTS` exactly, including across
+/// files. This is the clearest same-vs-different pairing in the whole suite:
+/// Java and Go both produce `IMPLEMENTS` edges for "a type satisfies an
+/// interface," arrived at by opposite means (explicit keyword vs. structural
+/// inference), yet `impact_of` sees no difference between them.
+#[test]
+fn java_adapter_produces_equivalent_implements_query_behavior_to_rust_python_and_go() {
+    let java_repo = TempRepo::new(&[
+        (
+            "Shape.java",
+            "public interface Shape {\n    double area();\n}\n",
+        ),
+        (
+            "Circle.java",
+            "public class Circle implements Shape {\n    public double area() {\n        return helper();\n    }\n\n    double helper() {\n        return 0;\n    }\n}\n",
+        ),
+    ]);
+
+    let java_result = analyze(&java_repo);
+    let (java_graph, java_report) = Graph::build(
+        java_result.syntax_entities.clone(),
+        java_result.symbols.clone(),
+        java_result.edges.clone(),
+    );
+    assert!(java_report.is_clean());
+
+    let java_engine = QueryEngine::new(&java_graph);
+
+    // Structural relationship: Circle satisfies Shape across files, exactly
+    // as Rust's cross-file IMPLEMENTS, Python's cross-file EXTENDS, and Go's
+    // cross-file structural IMPLEMENTS all do.
+    let java_shape = java_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("Java Shape symbol");
+    let java_impact = java_engine.impact_of(&java_shape.id);
+    assert!(
+        java_impact
+            .iter()
+            .any(|id| java_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "Java: Circle should be in Shape's impact set via explicit IMPLEMENTS"
+    );
+
+    // Same-file call: Circle.area calls helper (both declared in Circle.java,
+    // matching the same-file-call limitation the Rust/Python/Go fixtures
+    // already document for their own adapters' scope-tree reach).
+    let java_helper = java_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("Java helper symbol");
+    let java_callers = java_engine.callers_of(&java_helper.id);
+    assert!(
+        java_callers.iter().any(|s| s.name == "area"),
+        "Java: area should call helper"
+    );
+
+    for kind in [EdgeKind::Calls, EdgeKind::References, EdgeKind::Implements] {
+        assert!(
+            java_result.edges.iter().any(|e| e.kind == kind),
+            "Java: expected at least one {kind:?} edge"
+        );
+    }
+}

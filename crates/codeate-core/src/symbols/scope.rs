@@ -75,9 +75,21 @@ impl ScopeTree {
                 SyntaxKind::Class
                 | SyntaxKind::Struct
                 | SyntaxKind::Enum
-                | SyntaxKind::Interface
-                | SyntaxKind::Variable
-                | SyntaxKind::Parameter => {
+                | SyntaxKind::Interface => {
+                    self.bind(scope_idx, &child.name, child.id.clone());
+                    // Not a lexical scope boundary itself (only Module/
+                    // Function/Method are) -- recurse in the SAME scope so
+                    // a nested method (Python classes nest their methods
+                    // directly in the AST, unlike Rust's separate `impl`
+                    // blocks, which are already children of the enclosing
+                    // module) still gets its own scope registered, and
+                    // resolves names against the enclosing scope rather
+                    // than a nonexistent "class scope" (matching real
+                    // Python semantics: a method body's name lookup skips
+                    // right past its own class's body).
+                    self.populate(scope_idx, child, entities, edges);
+                }
+                SyntaxKind::Variable | SyntaxKind::Parameter => {
                     self.bind(scope_idx, &child.name, child.id.clone());
                 }
                 // Phase 14's repository-level kinds never appear in an
@@ -219,5 +231,46 @@ mod tests {
 
         assert_eq!(tree.lookup(run_scope, "Value"), Some(&inner_value.id));
         assert_eq!(tree.lookup(tree.root(), "Value"), Some(&outer_value.id));
+    }
+
+    /// A method nested directly under a `Class` in the `CONTAINS` tree
+    /// (Python's own shape, unlike Rust's separate `impl` blocks) must
+    /// still get its own scope, and that scope's *parent* must be the
+    /// enclosing module -- not the class, which isn't a lexical scope
+    /// boundary (a method body's name lookup skips right past its own
+    /// class, matching real Python semantics). A prior bug here meant
+    /// `Class`/`Struct`/`Enum`/`Interface` only bound a name and never
+    /// recursed into their own `CONTAINS` children at all, so a nested
+    /// method's body was silently never resolved.
+    #[test]
+    fn a_method_nested_under_a_class_opens_a_scope_whose_parent_is_the_module() {
+        let module = SyntaxEntity::new(SyntaxKind::Module, "module.py", "module.py");
+        let mut edges = Vec::new();
+        let helper = declare(
+            &module,
+            SyntaxEntity::new(SyntaxKind::Function, "module.py", "helper"),
+            &mut edges,
+        );
+        let circle = declare(
+            &module,
+            SyntaxEntity::new(SyntaxKind::Class, "module.py", "Circle"),
+            &mut edges,
+        );
+        let area = declare(
+            &circle,
+            SyntaxEntity::new(SyntaxKind::Method, "module.py::Circle", "area"),
+            &mut edges,
+        );
+        let entities = vec![module.clone(), helper.clone(), circle.clone(), area.clone()];
+
+        let tree = ScopeTree::build(&module, &entities, &edges);
+
+        let area_scope = tree
+            .scope_of(&area.id)
+            .expect("area gets its own scope despite being nested under a Class");
+        // helper isn't bound in area's own scope, but is visible by walking
+        // up to the module (root) scope -- proving area_scope's parent is
+        // the module, not some intermediate "class scope".
+        assert_eq!(tree.lookup(area_scope, "helper"), Some(&helper.id));
     }
 }

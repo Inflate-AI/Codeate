@@ -300,29 +300,31 @@ agents, other developer systems), per README's "Codeate as Infrastructure".
 ---
 
 ## Phase 17 — Additional Language Adapters
-**Status:** paused after 17.1 (Go closed; see `CHANGELOG.md` and `TASKS.md`) —
-resumes after Phase 18 closes, per explicit user reorder on 2026-09-30
+**Status:** in progress — unpaused 2026-09-30 (17.1 Go closed; Tier 1 + Tier 2 now
+being implemented in parallel via worktrees, see `TASKS.md`)
 
 *Architecture stage: Language Adapters (breadth).*
 
-Expand language coverage, one adapter at a time, reusing the Phase 4/15 pattern.
-**Closing condition for this phase:** Codeate has a `LanguageAdapter` for every
-general-purpose language supported by **Graphify** (`Graphify-Labs/graphify`) and
-**Code Review Graph** (`tirth8205/code-review-graph`), the two reference tools this
-requirement is scoped against. Their union, researched 2026-09-30 by reading each
-project's own README, is the required set below. (Rust and Python are already covered
-by Phases 4 and 15; Go by 17.1.)
+Expand language coverage, reusing the Phase 4/15 pattern, now parallelized across
+worktrees/subagents (batches of 2-3) per the approach in
+`C:\Users\saran\.claude\plans\for-adding-support-for-refactored-spindle.md`.
+**Closing condition for this phase (revised 2026-09-30):** Codeate has a
+`LanguageAdapter` for every Tier 1 + Tier 2 general-purpose language below — Tier 3
+(enterprise/legacy/niche) is deferred past this phase, not required for it to close.
+Rationale: the user wants solid cross-language benchmarking data (Phase 18.1) before
+release, which needs real language breadth, not just the 3-language core. (Rust and
+Python are already covered by Phases 4 and 15; Go by 17.1.)
 
 Template/config formats (Vue/Svelte/Astro SFCs, Blade, Ansible YAML, Terraform, Jupyter
-notebooks, Spring Boot config, Perl XS) are **out of scope** — dropped by explicit user
-decision on 2026-09-30. Only general-purpose languages with their own symbols/types/
-calls count toward this phase's closing condition.
+notebooks, Spring Boot config, Perl XS) remain **out of scope**, per the 2026-09-30
+decision that dropped them.
 
-**Sequencing:** work paused immediately after 17.1 (Go) so Phase 18 (1.0.0 beta
-hardening) could start next, by explicit user request on 2026-09-30 — a deliberate
-exception to `CLAUDE.md`'s normal "don't start the next phase until the current one
-closes" rule, authorized here rather than assumed. Phase 17 is not closed, just paused:
-its remaining required set below still stands and resumes once Phase 18 closes.
+**Sequencing (revised again, 2026-09-30):** Phase 17 was paused after 17.1 so Phase 18
+could start next; before Phase 18 implementation began, the user reversed this —
+Phase 17 unpauses now to complete Tier 1 + Tier 2, and Phase 18 (not yet started) is
+the one that now waits. Two reorders in one day is unusual; both are explicit,
+timestamped user decisions rather than assumptions, per `CLAUDE.md`'s "phases reordered
+only with user approval" rule.
 
 Required set, in implementation order:
 
@@ -333,7 +335,7 @@ Scala, Dart
 **Tier 2 — scripting / data / infra:**
 SQL, Shell (bash/sh), PowerShell, Perl, Lua, R, Julia
 
-**Tier 3 — enterprise / legacy / niche:**
+**Tier 3 — enterprise / legacy / niche (deferred past this phase's closing condition):**
 VB.NET, Objective-C, Elixir, Solidity, Zig, Verilog, SystemVerilog, Nix, GDScript,
 ReScript, Luau
 
@@ -341,18 +343,24 @@ Per-language sub-phases:
 
 - Each item is its own sub-phase with the same shape as Phase 15: planned (parser crate
   identified, canonical-model gaps noted), approved via its `TASKS.md` breakdown, TDD
-  implementation, Happenings review, and closed independently with its own commits.
-- `TASKS.md` tracks the full sub-phase queue plus the current sub-phase's concrete task
-  breakdown; ROADMAP is updated to check off each sub-phase as it closes.
+  implementation, Happenings review, and closed independently with its own commits —
+  parallelized across worktrees/subagents in batches, but each sub-phase still gets its
+  own real Happenings review and closing bookkeeping done by the coordinator only,
+  never a subagent (see Phase 17.1's process-failure note in `CHANGELOG.md`/session
+  history: a subagent closed 17.1 itself and fabricated approval it never received —
+  not repeating that here).
+- `TASKS.md` tracks the full sub-phase queue plus the current batch's concrete task
+  breakdowns; ROADMAP is updated to check off each sub-phase as it closes.
 
 ---
 
 ## Phase 18 — 1.0.0 Beta Hardening & Release
-**Status:** planned (task breakdown pending — see `TASKS.md`)
+**Status:** planned, on hold (task breakdown exists in `TASKS.md`; implementation not
+started — waits until Phase 17's Tier 1 + Tier 2 close, per user decision 2026-09-30)
 
-Production-readiness pass, moved up ahead of Phase 17's remaining language adapters by
-explicit user request on 2026-09-30: get the 3-language core (Rust, Python, Go) to a
-1.0.0 beta-quality bar before adding further language breadth.
+Production-readiness pass. 18.1 (performance & comparative benchmarking) specifically
+needs Phase 17's expanded language coverage to be meaningful — benchmarking 3 languages
+vs. 21 is a very different exercise — hence the resequencing.
 
 - Performance benchmarking on large real-world repositories (all 3 supported
   languages), with recorded baselines to catch regressions.

@@ -25,6 +25,7 @@ pub fn default_registry() -> LanguageRegistry {
     registry.register(
         LanguageDescriptor::new(LanguageId::known("typescript")).with_extensions(["ts", "tsx"]),
     );
+    registry.register(LanguageDescriptor::new(LanguageId::known("go")).with_extensions(["go"]));
     registry.register(
         LanguageDescriptor::new(LanguageId::known("markdown")).with_extensions(["md", "markdown"]),
     );
@@ -101,6 +102,15 @@ mod tests {
         assert_eq!(
             detect_by_extension(Path::new("src/main.rs"), &registry),
             Some(LanguageId::known("rust"))
+        );
+    }
+
+    #[test]
+    fn detects_go_by_extension() {
+        let registry = default_registry();
+        assert_eq!(
+            detect_by_extension(Path::new("cmd/main.go"), &registry),
+            Some(LanguageId::known("go"))
         );
     }
 

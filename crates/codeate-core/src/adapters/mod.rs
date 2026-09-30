@@ -1,10 +1,12 @@
 pub mod go;
+pub mod java;
 pub mod python;
 pub mod rust;
 
 use std::collections::HashMap;
 
 pub use go::GoAdapter;
+pub use java::JavaAdapter;
 pub use python::PythonAdapter;
 pub use rust::RustAdapter;
 
@@ -21,6 +23,7 @@ pub fn default_adapters() -> HashMap<LanguageId, Box<dyn DynLanguageAdapter>> {
     adapters.insert(LanguageId::known("rust"), Box::new(RustAdapter));
     adapters.insert(LanguageId::known("python"), Box::new(PythonAdapter));
     adapters.insert(LanguageId::known("go"), Box::new(GoAdapter));
+    adapters.insert(LanguageId::known("java"), Box::new(JavaAdapter));
     adapters
 }
 
@@ -44,6 +47,12 @@ mod tests {
     fn default_adapters_registers_go() {
         let adapters = default_adapters();
         assert!(adapters.contains_key(&LanguageId::known("go")));
+    }
+
+    #[test]
+    fn default_adapters_registers_java() {
+        let adapters = default_adapters();
+        assert!(adapters.contains_key(&LanguageId::known("java")));
     }
 
     #[test]

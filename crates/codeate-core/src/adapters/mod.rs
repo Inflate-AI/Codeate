@@ -1,7 +1,9 @@
+pub mod python;
 pub mod rust;
 
 use std::collections::HashMap;
 
+pub use python::PythonAdapter;
 pub use rust::RustAdapter;
 
 use crate::adapter::DynLanguageAdapter;
@@ -15,6 +17,7 @@ use crate::language::LanguageId;
 pub fn default_adapters() -> HashMap<LanguageId, Box<dyn DynLanguageAdapter>> {
     let mut adapters: HashMap<LanguageId, Box<dyn DynLanguageAdapter>> = HashMap::new();
     adapters.insert(LanguageId::known("rust"), Box::new(RustAdapter));
+    adapters.insert(LanguageId::known("python"), Box::new(PythonAdapter));
     adapters
 }
 
@@ -26,6 +29,12 @@ mod tests {
     fn default_adapters_registers_rust() {
         let adapters = default_adapters();
         assert!(adapters.contains_key(&LanguageId::known("rust")));
+    }
+
+    #[test]
+    fn default_adapters_registers_python() {
+        let adapters = default_adapters();
+        assert!(adapters.contains_key(&LanguageId::known("python")));
     }
 
     #[test]

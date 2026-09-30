@@ -7,6 +7,95 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 15] — Second Language Adapter
+
+### Added
+
+- Generalized `LanguageAdapter`: a new `resolve_file` hook covers everything past
+  parsing/extraction (reference/call/instantiate resolution, structural relationships),
+  with a default empty implementation so a parser-only adapter (Phase 4 shape) still
+  satisfies the trait. `pipeline.rs` previously called Rust-specific free functions
+  directly instead of going through the trait at all -- discovered while planning this
+  phase, since a second adapter couldn't prove anything about language-agnosticism
+  without this being real first.
+- `DynLanguageAdapter` (`adapter.rs`, new): an object-safe view of `LanguageAdapter`,
+  derived automatically via a blanket impl (`std::any::Any` type erasure for the
+  per-adapter `Ast` associated type) so `pipeline::run_pipeline` can dispatch across
+  multiple concrete adapters by `LanguageId` without knowing each one's `Ast` type at
+  the call site. `adapters::default_adapters()` is the registry it dispatches through.
+- Rust's own `resolve_body`/`resolve_implements`/`resolve_supertraits`/
+  `resolve_overrides`/`resolve_imports`/`resolve_exports` calls moved out of
+  `pipeline.rs` and behind `RustAdapter::resolve_file` -- re-deriving `ResolutionSites`
+  internally via a second `extract_with_sites` call rather than threading them across
+  the trait boundary, since they borrow into the AST. Verified **behavior-identical**:
+  all 206 pre-existing tests passed unchanged after the refactor, with no fixture or
+  assertion touched.
+- Python adapter (`adapters/python.rs`, new, via `rustpython-parser`):
+  - Parser + AST extractor: modules/classes/functions/methods/params/variables/
+    statements mapped to canonical syntax entities + `CONTAINS`/`DECLARES`, matching
+    the Rust adapter's item-vs-body extraction split -- built TDD, golden-file test
+    (`tests/python_adapter.rs` + `tests/fixtures/python_adapter/sample.py`) mirroring
+    `tests/rust_adapter.rs`.
+  - Type extraction: PEP 484 annotations mapped to the existing (already
+    language-agnostic) `TypeRef`/`type_symbol_for` -- primitives, `Foo[Bar, Baz]`
+    generics, dotted attribute types, an explicit `Unresolved` for anything else (PEP
+    604 unions included). Not wired into `ACCEPTS`/`RETURNS` binding, at parity with
+    the Rust adapter's own undocumented-until-now `extract_signature_types` gap.
+  - Reference/call/instantiate resolution: `REFERENCES` for `Load`-context names,
+    `CALLS` for bare-name and best-effort method-name-match calls, `INSTANTIATES` for a
+    call resolving in scope to a class -- via a single `walk_expr_sites`/
+    `walk_stmt_sites` pair covering common expression/statement forms (mirrors the
+    Rust adapter's own `walk_expr`/`walk_stmt`, including the same "a call site fires
+    both a reference and a call" behavior).
+  - Structural relationships: `EXTENDS` from a class to each base class (Python has no
+    separate interface/trait construct, so a base is always another `Class`, unlike
+    Rust's `IMPLEMENTS`-to-an-`Interface`); `IMPORTS` for `import`/`from ... import`,
+    resolved by searching the repository's own declared entities by name (Python has
+    no `crate::`-style marker distinguishing a local import from an external one, so
+    every import tries local resolution first, falling back to an explicit
+    `external-module` placeholder); `EXPORTS` via `__all__` when present, else the
+    "no leading underscore" convention (Python's real public-API convention, since
+    there's no `pub` keyword to inspect).
+  - All of the above wired into `PythonAdapter::resolve_file`, dispatched through the
+    same `run_pipeline` as Rust, verified via `tests/python_pipeline.rs` (a Python file
+    resolved through `analyze_repository` end-to-end, and a repository containing both
+    a Rust and a Python file resolved in the same call).
+
+### Fixed
+
+- `symbols/scope.rs`'s scope-tree builder bound `Class`/`Struct`/`Enum`/`Interface`
+  entities into their enclosing scope but never recursed into their own `CONTAINS`
+  children. Harmless for Rust (`impl` methods are always declared under the enclosing
+  module, never under the `struct` itself, so this case never arose), but Python
+  nests a class's methods directly under the `class` in the AST -- so every method
+  silently never got a scope registered at all, meaning nothing inside a method body
+  (not even `self`) ever resolved. Found while verifying Task 7's pipeline wiring
+  end-to-end (a `Calls` edge that should have existed didn't). Fixed by recursing into
+  the same scope rather than opening a new one (a class isn't a lexical scope boundary
+  -- matches real Python semantics, where a method body's name lookup skips right past
+  its own class). Added a dedicated regression test (a method nested under a class
+  resolving a module-level name); all 242 Rust-side tests stayed green throughout.
+
+### Verified
+
+- Cross-adapter test (`tests/cross_adapter.rs`): equivalent Rust/Python fixture repos
+  (a base type + a derived type that cross-file-imports it, plus a same-file helper
+  call) analyzed through the identical `QueryEngine` surface. `impact_of` picks up
+  both Rust's `IMPLEMENTS` and Python's `EXTENDS` identically; `dependencies_of`/
+  `callers_of` behave identically for both, despite the underlying edge kinds
+  differing where the languages themselves differ (no interface/trait concept in
+  Python). Building this test also caught that a bare/imported cross-file function
+  call doesn't resolve in *either* adapter (`resolve_calls`'s scope tree is
+  single-file only -- a pre-existing, now-documented limitation, not a Python-adapter
+  bug), so the fixture was corrected to match what's actually proven to work rather
+  than papering over the gap.
+- Dogfooded against Codeate's own repository (still pure Rust): stable, identical
+  entity/symbol/edge counts across full and incremental `analyze` runs after the
+  pipeline-generalization refactor.
+- `scripts/check.ps1` (`cargo fmt --check`, `cargo clippy --workspace --all-targets`,
+  `cargo test --workspace`) passes: 291 tests total.
+- New dependency: `rustpython-parser`.
+
 ## [Phase 14] — Repository-Level State
 
 ### Added

@@ -246,19 +246,33 @@ Higher-level repository facts beyond code structure.
 ---
 
 ## Phase 15 — Second Language Adapter
-**Status:** planned
+**Status:** done
 
 *Architecture stage: Language Adapters (validating language-agnosticism).*
 
 Prove the canonical model and pipeline (Phases 4–8) generalize beyond the bootstrap
-language by implementing a second, architecturally different adapter (e.g. Python or
-TypeScript).
+language by implementing a second, architecturally different adapter: **Python**, via
+`rustpython-parser`.
 
-- Full adapter: parser, AST extractor, symbol/type/reference resolvers.
+Discovered while planning: `pipeline::analyze_repository` does not actually dispatch
+through `LanguageAdapter`'s trait methods for resolution today — it calls Rust-specific
+free functions directly, and the trait has no hook at all for structural resolution
+(implements/overrides/imports/exports). A second adapter can't prove
+language-agnosticism without first making that dispatch real, so this phase opens with
+that refactor (verified behavior-identical to today) before any Python-specific code is
+written.
+
+- Generalize `LanguageAdapter` + pipeline dispatch: extend the trait with the resolution
+  hooks Phase 5–8 need, move Rust's existing logic behind them, make the pipeline
+  dispatch per-file by `LanguageId` — no behavior change, all existing tests pass
+  unchanged.
+- Full Python adapter: parser, AST extractor, symbol/type/reference/structural
+  resolvers. Phase 5's `build_symbol_table`/`ScopeTree` are already language-agnostic
+  and expected to work for Python unchanged.
 - Any canonical-model gaps found are fixed in Phase 3's model, not worked around in the
   adapter.
-- Cross-adapter test: two fixture repos (Rust + new language) analyzed with identical
-  query behavior for equivalent constructs.
+- Cross-adapter test: two fixture repos (Rust + Python) analyzed with identical query
+  behavior for equivalent constructs.
 
 ---
 

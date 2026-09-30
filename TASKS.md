@@ -24,9 +24,9 @@ closing bookkeeping — after genuine user confirmation, not before.
 - [x] 17.2 TypeScript — batch 1, closed
 - [x] 17.3 JavaScript — batch 1, closed
 - [x] 17.4 Java — batch 1, closed
-- [ ] 17.5 C#
-- [ ] 17.6 Kotlin
-- [ ] 17.7 C
+- [ ] 17.5 C# — batch 2
+- [ ] 17.6 Kotlin — batch 2
+- [ ] 17.7 C — batch 2
 - [ ] 17.8 C++
 - [ ] 17.9 Ruby
 - [ ] 17.10 PHP
@@ -58,10 +58,43 @@ One merged worktree directory resisted `git worktree remove` (lingering file han
 harmless) — pruned from git's tracking; the leftover directory can be removed later
 once nothing holds it open.
 
-### Batch 2 — planning pending
+### Batch 2 — C#, Kotlin, C (in progress)
 
-Tiers "17.5+" get their own planning pass (parser crate, gap check, task list) before
-the next batch starts — not detailed yet.
+Same 7-task shape and worktree-per-language process as batch 1. Lessons applied:
+`target/debug/incremental` and stale `.pdb` files cleared proactively before starting
+(D:\ was at 6.6GB free going in), and each worktree agent is told to clean its own
+incremental cache before a final verification build if disk gets tight, rather than
+letting it silently fail.
+
+**17.5 C#** — parser: `tree-sitter-c-sharp` (comprehensive C# 1-13 support). Closest
+structural template is Java (17.4): explicit `class`/`interface`, explicit base-list
+syntax (`class Foo : IBar`) for EXTENDS/IMPLEMENTS — simpler than Go/TS's structural
+inference. Watch for: generics with constraints (`where T : IComparable<T>` — same
+canonical-model gap Java already found and left open, follow that precedent rather
+than re-litigating it), properties (`get`/`set` — map as a Field or a Method pair,
+pick one and document it), namespaces for Module mapping, attributes (like Java
+annotations — parse past, don't model semantics), nullable reference types (`string?`
+— likely fits `TypeRef` as-is, confirm), `async`/`await` (out of scope for control-flow
+modeling, just don't crash on it).
+
+**17.6 Kotlin** — parser: `tree-sitter-kotlin`. Closer to C#/Java for explicit
+`class`/`interface`/`: SuperType` syntax, but has real divergences to document as
+gaps rather than force: extension functions (a function "extending" a type it doesn't
+own — no clean canonical-model fit, document as not-extracted), data classes (map as
+a normal Class, don't try to model auto-generated equals/hashCode/copy), sealed
+classes and `when` expressions (structural extraction only, no exhaustiveness
+checking), companion objects, nullable types (`T?` — same `TypeRef` question as C#).
+
+**17.7 C** — parser: `tree-sitter-c`. Structurally the most different adapter yet: no
+classes/interfaces/inheritance at all, so EXTENDS/IMPLEMENTS are simply never
+produced (not a gap, a correct absence — document as such rather than leaving it
+looking unfinished). Structs/unions/enums, functions (no methods — no receiver
+concept), global variables, `static`/`extern` linkage for a rough EXPORTS proxy
+(no real module system — header `#include` is the closest thing to IMPORTS, but the
+preprocessor is a separate pass tree-sitter doesn't run, so `#include` resolution is a
+documented gap, not attempted; function pointers as a `TypeRef` case to check).
+
+Tiers "17.8+" get their own planning pass before batch 3 starts — not detailed yet.
 
 ---
 

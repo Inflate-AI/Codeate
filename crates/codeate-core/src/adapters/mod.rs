@@ -1,4 +1,5 @@
 pub mod go;
+pub mod java;
 pub mod python;
 pub mod rust;
 pub mod typescript;
@@ -6,6 +7,7 @@ pub mod typescript;
 use std::collections::HashMap;
 
 pub use go::GoAdapter;
+pub use java::JavaAdapter;
 pub use python::PythonAdapter;
 pub use rust::RustAdapter;
 pub use typescript::TypeScriptAdapter;
@@ -24,6 +26,7 @@ pub fn default_adapters() -> HashMap<LanguageId, Box<dyn DynLanguageAdapter>> {
     adapters.insert(LanguageId::known("python"), Box::new(PythonAdapter));
     adapters.insert(LanguageId::known("go"), Box::new(GoAdapter));
     adapters.insert(LanguageId::known("typescript"), Box::new(TypeScriptAdapter));
+    adapters.insert(LanguageId::known("java"), Box::new(JavaAdapter));
     adapters
 }
 
@@ -53,6 +56,12 @@ mod tests {
     fn default_adapters_registers_typescript() {
         let adapters = default_adapters();
         assert!(adapters.contains_key(&LanguageId::known("typescript")));
+    }
+
+    #[test]
+    fn default_adapters_registers_java() {
+        let adapters = default_adapters();
+        assert!(adapters.contains_key(&LanguageId::known("java")));
     }
 
     #[test]

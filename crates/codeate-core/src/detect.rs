@@ -26,6 +26,8 @@ pub fn default_registry() -> LanguageRegistry {
         LanguageDescriptor::new(LanguageId::known("typescript")).with_extensions(["ts", "tsx"]),
     );
     registry.register(LanguageDescriptor::new(LanguageId::known("go")).with_extensions(["go"]));
+    registry
+        .register(LanguageDescriptor::new(LanguageId::known("java")).with_extensions(["java"]));
     registry.register(
         LanguageDescriptor::new(LanguageId::known("markdown")).with_extensions(["md", "markdown"]),
     );
@@ -120,6 +122,15 @@ mod tests {
         assert_eq!(
             detect_by_extension(Path::new("scripts/build.py"), &registry),
             Some(LanguageId::known("python"))
+        );
+    }
+
+    #[test]
+    fn detects_java_by_extension() {
+        let registry = default_registry();
+        assert_eq!(
+            detect_by_extension(Path::new("src/Main.java"), &registry),
+            Some(LanguageId::known("java"))
         );
     }
 

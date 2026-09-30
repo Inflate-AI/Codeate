@@ -7,6 +7,116 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 17.4] — Java Language Adapter
+
+Sub-phase of Phase 17 (Additional Language Adapters), implemented in parallel with
+17.2/17.3 via git worktrees -- see `ROADMAP.md` for the full required-language set and
+closing condition.
+
+### Added
+
+- New Java language adapter (`crates/codeate-core/src/adapters/java.rs`), parsing via
+  `tree-sitter`/`tree-sitter-java`.
+- Extraction: per-file `Module`; `Class`/`Interface`/`Enum` (nested types scoped under
+  their enclosing type); `Method` (constructors included, no separate constructor
+  kind); `Parameter`; `Variable` (fields, locals, and enum constants); generic
+  `Statement` for unhandled body statements.
+- Symbol resolution reuses Phase 5's `ScopeTree`/`build_symbol_table` unchanged.
+- Type resolution (`extract_type`, primitives/named/generics with type args) written
+  and unit-tested but not yet wired into the pipeline, matching Go/Rust's own same-shaped
+  gap.
+- Reference/call/instantiate resolution: bare identifiers and calls via `ScopeTree`;
+  receiver-qualified calls (`obj.method()`) by best-effort name match; `new Type(...)`
+  resolves to `INSTANTIATES`.
+- Structural relationships read directly off Java's explicit `extends`/`implements`
+  keywords (simpler than Go's structural inference), resolved repository-wide.
+  `IMPORTS` placeholder-resolves every import (external-package tag), same posture as
+  Go. `EXPORTS` reads Java's explicit `public` modifier.
+- Cross-adapter test extended with a Java fixture, proving Java's explicit-keyword
+  `IMPLEMENTS` and Go's structural `IMPLEMENTS` produce identical `impact_of` query
+  behavior despite arriving at the edge by opposite means.
+
+### Known gaps (documented, not fixed, following Go/Rust precedent)
+
+- `TypeRef::Generic` carries only a type-parameter name, nowhere to record a bound
+  (e.g. `<T extends Comparable<T>>`).
+
+## [Phase 17.3] — JavaScript Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.2/17.4 via git worktrees.
+
+### Added
+
+- New JavaScript language adapter (`crates/codeate-core/src/adapters/javascript.rs`),
+  parsing via `tree-sitter`/`tree-sitter-javascript`.
+- Extraction: `Module`/`Class` (ES6 classes)/`Method`/`Function`/`Parameter`/
+  `Variable` (`var`/`let`/`const`)/`Statement`.
+- Symbol resolution reuses Phase 5's `ScopeTree`/`SymbolTable` unchanged, confirming
+  they stay language-agnostic across a 4th adapter.
+- No type resolution: JavaScript has no annotation syntax, so `ACCEPTS`/`RETURNS` are
+  simply never produced -- a deliberate no-op, not fabricated types.
+- `EXTENDS` for ES6 `class ... extends` inheritance (general prototype-chain analysis
+  is out of scope). `IMPORTS`/`EXPORTS` resolve both ES module syntax and CommonJS
+  `require`/`module.exports`.
+- Cross-adapter test extended with a JavaScript fixture exercising cross-file
+  `EXTENDS`/`impact_of`, same-file `CALLS`, and cross-file `IMPORTS`/`DEPENDS_ON`.
+
+### Fixed
+
+- `resolve_extends` was searching only the current file's own entities for a
+  superclass instead of the whole repository, so cross-file `class Circle extends
+  Shape` (with `Shape` declared in another file) silently failed to resolve. Caught
+  by the cross-adapter test; fixed to search repository-wide, matching every other
+  adapter's structural-relationship resolution.
+
+### Known gaps (documented)
+
+- Nested function/class declarations inside a function body, destructuring
+  bindings/parameters, rest parameters, arrow functions assigned to variables, and
+  computed class members are not extracted.
+- `var`'s function-scoping vs. `let`/`const`'s block-scoping is a real divergence
+  `ScopeTree` doesn't model (it only opens scopes at Module/Function/Method
+  boundaries).
+- Import/require path resolution is name-based best-effort against repo-wide
+  entities, not actual relative-path/module resolution.
+
+## [Phase 17.2] — TypeScript Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.3/17.4 via git worktrees.
+
+### Added
+
+- New TypeScript language adapter
+  (`crates/codeate-core/src/adapters/typescript.rs`), parsing via
+  `tree-sitter`/`tree-sitter-typescript` (TS grammar; JSX/TSX embedding out of scope).
+- Extraction: `Class`/`Interface` (interface method signatures declared as `Method`
+  entities under it, mirroring Go's trait-method handling).
+- `IMPLEMENTS` handled both ways: explicit `implements` clause honored by name; when
+  absent, structural inference (method-set superset check, same algorithm as Go's
+  `resolve_implements`) still produces the edge. `EXTENDS` covers class-extends-class
+  and interface-extends-interface.
+- `EXPORTS` tracked from the explicit `export` keyword (function/class/interface/
+  const, `export { name }` clauses, `export default <identifier>`) -- unlike Go's
+  uppercase-convention inference, since TS exports are syntactic. `IMPORTS` resolves
+  every source to an explicit `external-module` placeholder (relative-specifier
+  resolution against repo files is a documented gap).
+- `extract_type`/`extract_signature_types` written and tested but not yet wired into
+  the pipeline, matching Go's/Rust's own same-shaped gap.
+- Cross-adapter test extended with a TypeScript fixture exercising structural
+  `IMPLEMENTS` (no `implements` keyword) and `IMPORTS`.
+
+### Changed
+
+- **Canonical-model gap fix**: `crates/codeate-core/src/types.rs` had no way to
+  express "one of several types" (TypeScript `A | B`) or "all of several types"
+  (`A & B`) -- neither existed before. Added `TypeRef::Union`/`Intersection` as two
+  new closed-set variants with deterministic `key()`/`display_name()` handling.
+
+### Known gaps (documented)
+
+- Decorators, object/array destructuring params, class fields/index signatures are
+  not extracted.
+
 ## [Phase 17.1] — Go Language Adapter
 
 Sub-phase of Phase 17 (Additional Language Adapters) -- see `ROADMAP.md` for the

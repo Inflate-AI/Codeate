@@ -19,11 +19,11 @@ closing bookkeeping — after genuine user confirmation, not before.
 
 ### Sub-phase queue
 
-**Tier 1 — mainstream general-purpose** (12 remaining)
+**Tier 1 — mainstream general-purpose** (9 remaining)
 - [x] 17.1 Go
-- [ ] 17.2 TypeScript — batch 1
-- [ ] 17.3 JavaScript — batch 1
-- [ ] 17.4 Java — batch 1
+- [x] 17.2 TypeScript — batch 1, closed
+- [x] 17.3 JavaScript — batch 1, closed
+- [x] 17.4 Java — batch 1, closed
 - [ ] 17.5 C#
 - [ ] 17.6 Kotlin
 - [ ] 17.7 C
@@ -43,36 +43,25 @@ closing bookkeeping — after genuine user confirmation, not before.
 - [ ] 17.19 R
 - [ ] 17.20 Julia
 
-### Batch 1 — TypeScript, JavaScript, Java (in progress)
+### Batch 1 — TypeScript, JavaScript, Java (closed 2026-09-30, see `CHANGELOG.md`)
 
-Each follows 17.1's 7-task shape (parser integration → AST extraction → symbol
-resolution → type resolution → reference/call resolution → structural relationships →
-cross-adapter test extension), implemented in its own worktree/branch
-(`lang/typescript`, `lang/javascript`, `lang/java`), merged to `main` sequentially,
-`CARGO_TARGET_DIR` shared across worktrees to limit disk use (~8.6GB free on D:\ as of
-2026-09-30).
+Implemented in parallel via 3 worktrees, reviewed and merged sequentially into `main`.
+Verified independently (not just agent self-reports) after each merge — full
+`cargo test --workspace` + `cargo clippy --workspace --all-targets -- -D warnings`
+clean, all 5 cross-adapter tests passing.
 
-**17.2 TypeScript** — parser: `tree-sitter-typescript` (has a distinct TSX/TS grammar
-pair; use the TS grammar, JSX/TSX embedding is out of scope here). Go-specific
-divergences to watch: structural typing (interfaces satisfied structurally, similar to
-Go — reuse that pattern from 17.1), union/intersection types (canonical-model gap
-check: does `Type`/`TypeRef` support union/intersection today?), decorators,
-`export`/`import` ES module syntax for EXPORTS/IMPORTS/DEPENDS_ON.
+Lessons for future batches: the shared `CARGO_TARGET_DIR` strategy filled D:\
+completely during verification builds (Windows MSVC linker PDB/link limits plus
+multiple parsers' build artifacts add up fast) — clear `target/debug/incremental` and
+stale `.pdb` files proactively between batches rather than waiting for a hard failure.
+One merged worktree directory resisted `git worktree remove` (lingering file handle,
+harmless) — pruned from git's tracking; the leftover directory can be removed later
+once nothing holds it open.
 
-**17.3 JavaScript** — parser: `tree-sitter-javascript`. No static types (Type
-resolution mostly no-ops/dynamic — document this rather than fake types), prototypal
-inheritance for EXTENDS/IMPLEMENTS (structural, not class-keyword-only — ES6 `class`
-syntax covers the common case, don't attempt full prototype-chain analysis beyond
-that), CommonJS `require`/`module.exports` alongside ES module `import`/`export` for
-IMPORTS/EXPORTS.
+### Batch 2 — planning pending
 
-**17.4 Java** — parser: `tree-sitter-java`. Explicit `implements`/`extends` keywords
-(simpler than Go/TS's structural inference), checked exceptions and generics (type
-parameter bounds — canonical-model gap check), package-per-directory convention for
-Module mapping, annotations.
-
-Tiers "17.5+" get their own planning pass (parser crate, gap check, task list) when
-their batch starts — not detailed yet.
+Tiers "17.5+" get their own planning pass (parser crate, gap check, task list) before
+the next batch starts — not detailed yet.
 
 ---
 

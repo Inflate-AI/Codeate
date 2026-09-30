@@ -305,13 +305,45 @@ agents, other developer systems), per README's "Codeate as Infrastructure".
 *Architecture stage: Language Adapters (breadth).*
 
 Expand language coverage, one adapter at a time, reusing the Phase 4/15 pattern.
-Candidate order (subject to revision based on demand): Go, TypeScript/JavaScript
-(if not already Phase 15), Java, C#, Kotlin, C, C++.
+**Closing condition for this phase:** Codeate has a `LanguageAdapter` for every language
+and format supported by **Graphify** (`Graphify-Labs/graphify`) and **Code Review Graph**
+(`tirth8205/code-review-graph`), the two reference tools this requirement is scoped
+against. Their union, researched 2026-09-30 by reading each project's own README, is the
+required set below — this phase does not close, and Phase 18 does not start, until every
+item's sub-phase is `done`. (Rust and Python are already covered by Phases 4 and 15.)
 
-- Each language is its own sub-phase with the same shape as Phase 15: planned,
-  approved, and closed independently.
-- This phase entry is a placeholder tracking the queue; ROADMAP is updated to expand
-  each language into its own dated sub-phase when it's picked up.
+Required set, in implementation order (dependency-ordered: general-purpose languages
+before the template/config formats layered on top of them):
+
+**Tier 1 — mainstream general-purpose:**
+Go, TypeScript, JavaScript, Java, C#, Kotlin, C, C++, Ruby, PHP, Swift, Scala, Dart
+
+**Tier 2 — scripting / data / infra:**
+SQL, Shell (bash/sh), PowerShell, Perl, Lua, R, Julia
+
+**Tier 3 — enterprise / legacy / niche:**
+VB.NET, Objective-C, Elixir, Solidity, Zig, Verilog, SystemVerilog, Nix, GDScript,
+ReScript, Luau
+
+**Tier 4 — template/config formats (each depends on a Tier 1/2 adapter):**
+Vue SFC (needs TypeScript), Svelte SFC (needs TypeScript), Astro (needs TypeScript),
+Blade templates (needs PHP), Ansible YAML, Terraform/OpenTofu (`.tf`), Jupyter/Databricks
+notebooks (`.ipynb`), Spring Boot config (`application.properties`/`.yml`, needs Java),
+Perl XS (`.xs`, needs Perl)
+
+Per-language/format sub-phases:
+
+- Each item is its own sub-phase with the same shape as Phase 15: planned (parser crate
+  identified, canonical-model gaps noted), approved via its `TASKS.md` breakdown, TDD
+  implementation, Happenings review, and closed independently with its own commits.
+- Tier 4 items are not full `LanguageAdapter`s in the Phase 4 sense (they're
+  templates/config wrapping or adjacent to a host language) — each one's sub-phase plan
+  states explicitly how it maps onto the canonical model (e.g. embedded-language
+  extraction for Vue/Svelte/Astro SFCs, or a reduced entity set for config formats)
+  before implementation starts, with any canonical-model gaps fixed in Phase 3's model
+  rather than worked around in the adapter.
+- `TASKS.md` tracks the full sub-phase queue plus the current sub-phase's concrete task
+  breakdown; ROADMAP is updated to check off each sub-phase as it closes.
 
 ---
 
@@ -334,5 +366,7 @@ are stable.
   pipeline (ingest → parse → resolve → graph → persist → query → CLI → incremental).
 - Phase 15 is the first real test of the "language-agnostic" design principle; phases
   before it must not bake in Rust-specific assumptions.
-- Phase 17 is intentionally open-ended — new language sub-phases are appended as
-  they're approved, rather than trying to fully enumerate all target languages now.
+- Phase 17's required-language set is fixed (see above) to the union of Graphify's and
+  Code Review Graph's supported languages/formats — not open-ended. If either reference
+  tool adds languages before Phase 17 closes, re-run the research and get user approval
+  before expanding the required set further.

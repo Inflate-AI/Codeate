@@ -15,6 +15,16 @@ pub enum TypeRef {
     Reference { mutable: bool, inner: Box<TypeRef> },
     /// A generic type parameter in scope (`T`).
     Generic(String),
+    /// A union of several types (TypeScript `A | B`): a value is one of the
+    /// listed member types. Canonical-model gap identified in Phase 17.2
+    /// (TypeScript adapter) -- neither `Named`'s `type_args` nor any other
+    /// existing variant models "one of several alternatives", so this is a
+    /// genuinely new shape, not a workaround folded into an adapter.
+    Union(Vec<TypeRef>),
+    /// An intersection of several types (TypeScript `A & B`): a value
+    /// satisfies every listed member type at once. Same Phase 17.2
+    /// canonical-model gap as `Union`.
+    Intersection(Vec<TypeRef>),
     /// Anything that couldn't be classified. Keeps the raw source text
     /// rather than dropping the type silently.
     Unresolved(String),
@@ -40,6 +50,14 @@ impl TypeRef {
                 format!("ref{}:{}", if *mutable { "_mut" } else { "" }, inner.key())
             }
             TypeRef::Generic(name) => format!("generic:{name}"),
+            TypeRef::Union(members) => {
+                let keys = members.iter().map(TypeRef::key).collect::<Vec<_>>().join("|");
+                format!("union:{keys}")
+            }
+            TypeRef::Intersection(members) => {
+                let keys = members.iter().map(TypeRef::key).collect::<Vec<_>>().join("&");
+                format!("intersection:{keys}")
+            }
             TypeRef::Unresolved(raw) => format!("unresolved:{raw}"),
         }
     }
@@ -64,6 +82,16 @@ impl TypeRef {
                     inner.display_name()
                 )
             }
+            TypeRef::Union(members) => members
+                .iter()
+                .map(TypeRef::display_name)
+                .collect::<Vec<_>>()
+                .join(" | "),
+            TypeRef::Intersection(members) => members
+                .iter()
+                .map(TypeRef::display_name)
+                .collect::<Vec<_>>()
+                .join(" & "),
             TypeRef::Unresolved(raw) => raw.clone(),
         }
     }
@@ -135,6 +163,54 @@ mod tests {
         assert_ne!(type_symbol_for(&shared).id, type_symbol_for(&exclusive).id);
         assert_eq!(type_symbol_for(&shared).name, "&T");
         assert_eq!(type_symbol_for(&exclusive).name, "&mut T");
+    }
+
+    #[test]
+    fn union_of_two_types_has_a_pipe_joined_display_name() {
+        let union = TypeRef::Union(vec![
+            TypeRef::Primitive("string".to_string()),
+            TypeRef::Primitive("number".to_string()),
+        ]);
+        assert_eq!(type_symbol_for(&union).name, "string | number");
+    }
+
+    #[test]
+    fn intersection_of_two_types_has_an_ampersand_joined_display_name() {
+        let intersection = TypeRef::Intersection(vec![
+            TypeRef::Named {
+                name: "A".to_string(),
+                type_args: Vec::new(),
+            },
+            TypeRef::Named {
+                name: "B".to_string(),
+                type_args: Vec::new(),
+            },
+        ]);
+        assert_eq!(type_symbol_for(&intersection).name, "A & B");
+    }
+
+    #[test]
+    fn union_and_intersection_of_the_same_members_get_distinct_ids() {
+        let members = vec![
+            TypeRef::Primitive("string".to_string()),
+            TypeRef::Primitive("number".to_string()),
+        ];
+        let union = TypeRef::Union(members.clone());
+        let intersection = TypeRef::Intersection(members);
+        assert_ne!(type_symbol_for(&union).id, type_symbol_for(&intersection).id);
+    }
+
+    #[test]
+    fn member_order_affects_the_union_id() {
+        let ab = TypeRef::Union(vec![
+            TypeRef::Primitive("string".to_string()),
+            TypeRef::Primitive("number".to_string()),
+        ]);
+        let ba = TypeRef::Union(vec![
+            TypeRef::Primitive("number".to_string()),
+            TypeRef::Primitive("string".to_string()),
+        ]);
+        assert_ne!(type_symbol_for(&ab).id, type_symbol_for(&ba).id);
     }
 
     #[test]

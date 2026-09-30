@@ -28,6 +28,8 @@ pub fn default_registry() -> LanguageRegistry {
     registry.register(LanguageDescriptor::new(LanguageId::known("go")).with_extensions(["go"]));
     registry
         .register(LanguageDescriptor::new(LanguageId::known("java")).with_extensions(["java"]));
+    registry
+        .register(LanguageDescriptor::new(LanguageId::known("csharp")).with_extensions(["cs"]));
     registry.register(
         LanguageDescriptor::new(LanguageId::known("markdown")).with_extensions(["md", "markdown"]),
     );
@@ -131,6 +133,15 @@ mod tests {
         assert_eq!(
             detect_by_extension(Path::new("src/Main.java"), &registry),
             Some(LanguageId::known("java"))
+        );
+    }
+
+    #[test]
+    fn detects_csharp_by_extension() {
+        let registry = default_registry();
+        assert_eq!(
+            detect_by_extension(Path::new("src/Program.cs"), &registry),
+            Some(LanguageId::known("csharp"))
         );
     }
 

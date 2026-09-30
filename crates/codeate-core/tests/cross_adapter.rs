@@ -279,3 +279,88 @@ fn go_adapter_produces_equivalent_implements_query_behavior_to_rust_and_python()
         );
     }
 }
+
+/// Phase 17.2 task 7: extend the cross-adapter fixture with an equivalent
+/// TypeScript one. TypeScript's `IMPLEMENTS` can be explicit (`class ...
+/// implements Shape`) or, like Go's, structurally inferred with no
+/// `implements` clause at all -- this fixture deliberately uses the
+/// structural form, so the *query behavior* for interface satisfaction
+/// matches Go's own structural `IMPLEMENTS` (and Rust's/Python's explicit
+/// `IMPLEMENTS`/`EXTENDS`) exactly, including across files.
+///
+/// Like the Go fixture, this one keeps `helper`'s call site in the same
+/// file as its declaration: cross-file bare-name resolution is a known,
+/// pre-existing limitation shared by every adapter's own `ScopeTree`-based
+/// call resolution (each file only sees its own entities), not something
+/// specific to TypeScript. `IMPORTS`/`DEPENDS_ON` *is* exercised here,
+/// though (unlike the Go fixture) -- TypeScript's `import` is explicit, so
+/// `circle.ts`'s `import { Shape } from "./shape"` is a real IMPORTS site,
+/// even though the resolved target is an external-module placeholder
+/// rather than `shape.ts` itself (Codeate doesn't resolve relative import
+/// specifiers against repository files yet -- see
+/// `adapters::typescript::resolve_imports`'s own documented gap) -- so this
+/// fixture checks for the IMPORTS edge itself, not a resolved
+/// `DEPENDS_ON`/`dependencies_of` relationship the way the Rust/Python
+/// fixture does.
+#[test]
+fn typescript_adapter_produces_equivalent_implements_query_behavior_to_go_rust_and_python() {
+    let ts_repo = TempRepo::new(&[
+        (
+            "shape.ts",
+            "export interface Shape {\n  area(): number;\n}\n",
+        ),
+        (
+            "circle.ts",
+            "import { Shape } from \"./shape\";\n\nexport class Circle {\n  area(): number {\n    return helper();\n  }\n}\n\nfunction helper(): number {\n  return 0;\n}\n",
+        ),
+    ]);
+
+    let ts_result = analyze(&ts_repo);
+    let (ts_graph, ts_report) = Graph::build(
+        ts_result.syntax_entities.clone(),
+        ts_result.symbols.clone(),
+        ts_result.edges.clone(),
+    );
+    assert!(ts_report.is_clean());
+
+    let ts_engine = QueryEngine::new(&ts_graph);
+
+    // Structural relationship: Circle satisfies Shape across files, exactly
+    // as Go's cross-file structural IMPLEMENTS does.
+    let ts_shape = ts_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("TypeScript Shape symbol");
+    let ts_impact = ts_engine.impact_of(&ts_shape.id);
+    assert!(
+        ts_impact
+            .iter()
+            .any(|id| ts_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "TypeScript: Circle should be in Shape's impact set via structural IMPLEMENTS"
+    );
+
+    // Same-file call: Circle.area calls helper (both declared in circle.ts).
+    let ts_helper = ts_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("TypeScript helper symbol");
+    let ts_callers = ts_engine.callers_of(&ts_helper.id);
+    assert!(
+        ts_callers.iter().any(|s| s.name == "area"),
+        "TypeScript: area should call helper"
+    );
+
+    for kind in [
+        EdgeKind::Calls,
+        EdgeKind::References,
+        EdgeKind::Implements,
+        EdgeKind::Imports,
+    ] {
+        assert!(
+            ts_result.edges.iter().any(|e| e.kind == kind),
+            "TypeScript: expected at least one {kind:?} edge"
+        );
+    }
+}

@@ -300,7 +300,7 @@ agents, other developer systems), per README's "Codeate as Infrastructure".
 ---
 
 ## Phase 17 — Additional Language Adapters
-**Status:** planned
+**Status:** in progress (17.1 Go closed; see `CHANGELOG.md` and `TASKS.md`)
 
 *Architecture stage: Language Adapters (breadth).*
 

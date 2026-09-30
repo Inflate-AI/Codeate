@@ -13,7 +13,7 @@ closed independently, same shape as Phase 15.
 ### Sub-phase queue
 
 **Tier 1 — mainstream general-purpose**
-- [ ] 17.1 Go
+- [x] 17.1 Go
 - [ ] 17.2 TypeScript
 - [ ] 17.3 JavaScript
 - [ ] 17.4 Java
@@ -62,7 +62,7 @@ closed independently, same shape as Phase 15.
 
 ---
 
-### Sub-phase 17.1 — Go (up next, pending approval)
+### Sub-phase 17.1 — Go (closed -- see `CHANGELOG.md`)
 
 *Same shape as Phase 15: prove the pattern generalizes to a third, C-family-syntax
 language via `tree-sitter` rather than a hand-rolled or `syn`-style parser — the first

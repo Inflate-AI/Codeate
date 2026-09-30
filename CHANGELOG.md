@@ -7,6 +7,62 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 17.1] — Go Language Adapter
+
+Sub-phase of Phase 17 (Additional Language Adapters) -- see `ROADMAP.md` for the
+full required-language set and closing condition. Phase 17 itself stays open
+until every sub-phase in its queue closes; this entry covers only 17.1.
+
+### Added
+
+- New Go language adapter (`crates/codeate-core/src/adapters/go.rs`), parsing via
+  `tree-sitter`/`tree-sitter-go` -- the first `tree-sitter`-based adapter in the
+  codebase (Rust uses `syn`, Python uses `rustpython-parser`, both self-contained
+  typed ASTs). `GoAst` pairs `tree-sitter`'s `Tree` with its source text, since
+  `tree-sitter` nodes are spans into the original source rather than a
+  self-contained tree; this pairing is the shape the rest of Phase 17's
+  `tree-sitter`-based sub-phases will reuse.
+- Extraction: `Module`/`Struct`/`Interface`/`Function`/`Method`/`Parameter`/
+  `Variable`/`Statement` entities. Methods are parented under their receiver's
+  `Struct` entity when it's declared in the same file (a two-pass walk so
+  declaration order doesn't matter -- Go has none), falling back to the module
+  otherwise. Interface method signatures are declared as `Method` entities under
+  the `Interface`, mirroring the Rust adapter's own trait-method handling.
+- Symbol resolution: reuses Phase 5's `build_symbol_table`/`ScopeTree`
+  unchanged -- confirms Phase 15's language-agnosticism finding holds for a
+  `tree-sitter`-based adapter too, not just typed-AST ones.
+- Type resolution: `extract_type`/`extract_signature_types`/
+  `extract_generic_params`, covering primitives, named types, pointer types (as
+  `TypeRef::Reference`), and Go's multiple return values -- one `RETURNS` edge
+  per declared return type. No canonical-model change was needed: the model never
+  capped a function to one `RETURNS` edge. Not wired into `extract`/
+  `resolve_file`, matching the Rust/Python adapters' own same-shaped, tested but
+  not-yet-wired-in type binding.
+- Reference/call/instantiate resolution: wired live into `resolve_file`,
+  including Go's implicit interface satisfaction -- `IMPLEMENTS` edges derived
+  structurally (a struct's declared methods are a superset of an interface's,
+  since Go has no `implements` keyword) and resolved repository-wide, so a
+  cross-file interface is still found.
+- Imports: every import resolves to an explicit `external-package` placeholder.
+  Go's import paths need `go.mod`-aware resolution to distinguish a
+  same-repository package from a third-party one -- out of scope for this
+  sub-phase, a documented gap rather than a guess.
+- Exports: Go's uppercase-identifier convention (no `pub` keyword to inspect).
+- Cross-adapter test (`crates/codeate-core/tests/cross_adapter.rs`) extended with
+  a Go fixture, proving Go's structurally-inferred `IMPLEMENTS` produces the same
+  `impact_of` query behavior as Rust's explicit `IMPLEMENTS` and Python's
+  `EXTENDS`, including across files. Deliberately does not extend the
+  IMPORTS/DEPENDS_ON assertions: files in the same Go package see each other's
+  declarations without an import statement, so there is no IMPORTS edge between
+  the fixture's two files to produce -- a real difference in Go's module system,
+  not an adapter gap.
+
+### Verified
+
+- `cargo test --workspace`: 302 tests pass (29 new Go adapter tests, 1 new
+  cross-adapter test).
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+
 ## [Phase 16] — Public API / SDK Layer
 
 ### Added

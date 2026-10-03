@@ -19,7 +19,7 @@ closing bookkeeping — after genuine user confirmation, not before.
 
 ### Sub-phase queue
 
-**Tier 1 — mainstream general-purpose** (6 remaining)
+**Tier 1 — mainstream general-purpose** (3 remaining)
 - [x] 17.1 Go
 - [x] 17.2 TypeScript — batch 1, closed
 - [x] 17.3 JavaScript — batch 1, closed
@@ -27,12 +27,12 @@ closing bookkeeping — after genuine user confirmation, not before.
 - [x] 17.5 C# — batch 2, closed
 - [x] 17.6 Kotlin — batch 2, closed
 - [x] 17.7 C — batch 2, closed
-- [ ] 17.8 C++ — batch 3
-- [ ] 17.9 Ruby — batch 3
+- [x] 17.8 C++ — batch 3, closed
+- [x] 17.9 Ruby — batch 3, closed
 - [ ] 17.10 PHP
 - [ ] 17.11 Swift
 - [ ] 17.12 Scala
-- [ ] 17.13 Dart — batch 3
+- [x] 17.13 Dart — batch 3, closed
 
 **Tier 2 — scripting / data / infra**
 - [ ] 17.14 SQL
@@ -74,59 +74,33 @@ fix as batch 1 (clear `target/debug/incremental` + stale `.pdb`s). This is now a
 recurring cost of the shared-`CARGO_TARGET_DIR` strategy — worth reconsidering before
 batch 3 (e.g. clearing between every single merge, not just between batches).
 
-### Batch 3 — C++, Ruby, Dart (planned 2026-10-03)
+### Batch 3 — C++, Ruby, Dart (closed 2026-10-03, see `CHANGELOG.md`)
 
-Same 7-task shape and worktree-per-language process as batches 1-2, with one process
-change applied from batch 2's lesson: each worktree agent clears its own
-`target/debug/incremental` + stale `.pdb`s before its final verification build rather
-than waiting for the coordinator to do it between batches — disk hit critical levels
-twice during batch 2 under the shared-`CARGO_TARGET_DIR` strategy.
+Implemented in parallel via 3 worktrees, reviewed and merged sequentially into `main`.
+Verified independently after each merge — full `cargo test --workspace` (549 lib
+tests, 0 failures across every suite) + `cargo clippy --workspace --all-targets --
+-D warnings` clean, all 11 cross-adapter tests passing.
 
-Parser crates checked against this workspace's `tree-sitter = "0.25"` pin before
-writing any code (crates.io dependency metadata, 2026-10-03):
+No parser substitutions needed this batch — `tree-sitter-cpp` 0.23.4,
+`tree-sitter-ruby` 0.23.1, and `tree-sitter-dart` 0.2.0 (the latter verified
+compatible via its `tree-sitter-language` shim dependency, the same pattern
+`tree-sitter-kotlin-ng` uses, before any adapter code was written) all compiled
+clean against this workspace's `tree-sitter 0.25`.
 
-**17.8 C++** — parser: `tree-sitter-cpp` 0.23.4. Same `0.23.x` line as
-`tree-sitter-c-sharp`/`tree-sitter-java`, both already proven to work fine against this
-workspace's `tree-sitter 0.25` — no substitution expected. Closest structural template
-is C (17.7) extended with C's missing OOP layer: `class`/`struct` (both already
-present in the canonical model from C), single and multiple inheritance (`class Foo :
-public Bar, private Baz` — EXTENDS per public base, document access-specifier handling
-since the canonical model has no "private inheritance" concept — treat all bases as
-EXTENDS and don't attempt to encode access), templates (map onto the existing generic
-representation from Phase 6, watch for template specialization as a likely
-documented gap), operator overloading (model as a normal Method named after the
-operator, not a special kind), namespaces (Module mapping, like C#), `#include`
-(same documented-gap treatment as C's — preprocessor is a separate pass tree-sitter
-doesn't run), virtual/pure-virtual methods (OVERRIDES, mirroring Java's pattern).
+Lessons for batch 4: disk hit 100% full twice during this batch, worse than before —
+three worktrees building concurrently on the same `D:\` volume outpaces the
+clear-incremental-before-final-build mitigation from batch 2. Fixes applied
+in-the-moment: removed merged worktrees' full `target/` dirs (not just incremental)
+right after each merge, and regenerated `Cargo.lock` from scratch once rather than
+hand-resolving a lockfile merge conflict. Also caught: a broad `git add -A` during
+merge conflict resolution briefly staged the live agent worktrees themselves as
+embedded git repos — fixed by `git rm --cached` + gitignoring `.claude/worktrees/`
+going forward. For batch 4, consider sequencing merges tighter to the finish of each
+worktree (not waiting for all three to report) to reduce the peak-concurrent-build
+window, and/or pointing `CARGO_TARGET_DIR` at a volume with more headroom per
+worktree.
 
-**17.9 Ruby** — parser: `tree-sitter-ruby` 0.23.1. Same `0.23.x` line, same
-no-substitution expectation. Structurally closer to Python (15) than to any Tier 1
-language done so far: no static types at all (every `TypeRef` is unresolved/dynamic —
-document as correct, not a gap), `class`/`module` (Module doubles as both namespace
-and mixin unit — `include`/`extend`/`prepend` need a documented mapping decision,
-likely IMPLEMENTS-like or a documented gap if it doesn't fit cleanly), duck-typed
-method calls (REFERENCES/CALLS resolution will be best-effort/name-based, same
-caveat Python's dynamic dispatch already carries), `attr_accessor`/`attr_reader`/
-`attr_writer` (macro-generated Fields — decide whether to synthesize Field entities
-for these or document as not-extracted), blocks/procs/lambdas (treat as anonymous
-Functions or document as out of scope), open classes/monkey-patching (no special
-handling — last declaration wins, same as any redeclaration).
-
-**17.13 Dart** — parser: `tree-sitter-dart` 0.2.0, a newer grammar crate with
-different versioning (not `0.23.x`). Its only non-dev, non-build dependency is
-`tree-sitter-language = "^0.1"` (the same LanguageFn-shim pattern `tree-sitter-kotlin-ng`
-already uses successfully in this workspace) rather than a direct `tree-sitter`
-pin — expected to be compatible, but **verify the `LANGUAGE` constant compiles against
-this workspace's `tree-sitter 0.25` before writing adapter code**, same precedent as
-Kotlin's 17.6 substitution. Structural template: closest to Java/Kotlin (`class`,
-`interface` via abstract classes + `implements`, `extends` for single inheritance,
-`mixin`/`with` for Dart's mixin composition — needs its own documented mapping
-decision, likely similar to Ruby's `include`), `enum` (including Dart's enhanced enums
-with members — still maps to the existing Enum entity), named/positional/optional
-parameters (Parameter entities, watch for default-value and `required`/named-arg
-metadata as a likely documented gap), null safety (`String?` — same `TypeRef`
-question C#/Kotlin already answered, follow that precedent), top-level functions and
-`part`/`part of`/`import` (Module/IMPORTS mapping, closest to JS/TS's module system).
+Tiers "17.10+" get their own planning pass before batch 4 starts — not detailed yet.
 
 ---
 

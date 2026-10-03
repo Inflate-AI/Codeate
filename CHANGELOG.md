@@ -7,6 +7,127 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 17.13] — Dart Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.8/17.9 via git worktrees.
+
+### Added
+
+- New Dart language adapter (`crates/codeate-core/src/adapters/dart.rs`), parsing via
+  `tree-sitter-dart 0.2.0`. Unlike Kotlin's 17.6, **no parser substitution was
+  needed**: the crate's only non-dev/non-build dependency is `tree-sitter-language`
+  (the same version-agnostic `LanguageFn`-bridge pattern `tree-sitter-kotlin-ng`
+  already uses), so its `LANGUAGE` constant converts straight into this workspace's
+  `tree-sitter 0.25`. Verified with a standalone smoke test before any adapter code
+  was written.
+- Structurally closest to Kotlin/Java. `class` maps to `Interface` when
+  `abstract`/Dart 3's `interface` modifier is present, otherwise `Class` (documented
+  approximation, not a perfect semantic match). `mixin` declarations map to plain
+  `Class`; a class/enum's `with` clause maps to `IMPLEMENTS` rather than `EXTENDS`
+  (mirroring Ruby's `include` framing: a mixin contributes behavior like an interface
+  contract, not single inheritance). `implements` also maps to `IMPLEMENTS`, `extends`
+  to `EXTENDS`. Enhanced enums map to `Enum` + `Variable`/`Method` members.
+  Constructors (default, named, factory, const, redirecting) map to `Method`, with
+  named constructors keeping their own distinguishing name to avoid ID collisions
+  across multiple constructors on one class. `import`/`export`/`part` map to
+  `IMPORTS` with external-package placeholders; `library_export` folds into the same
+  `IMPORTS` bucket rather than `EXPORTS`. Exports read Dart's purely-lexical
+  leading-underscore privacy convention directly off entity names.
+- Cross-adapter test extended with a Dart fixture exercising cross-file `IMPLEMENTS`
+  and `IMPORTS`.
+
+### Known gaps (documented)
+
+- Default parameter values and `required`-named-argument metadata.
+- A `mixin` declaration's own `on` clause -- not exposed as a dedicated child node by
+  the grammar.
+- Typedef-style mixin-application classes (`class Foo = Base with M;`).
+- Binary/conditional/index expressions in bodies beyond the common
+  reference/call/instantiate shapes (same posture Kotlin/Java already carry).
+- Null safety (`String?`) follows the same `TypeRef` precedent C#/Kotlin established
+  (the `?` is dropped, inner type extracted; not wired into the main pipeline).
+
+## [Phase 17.9] — Ruby Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.8/17.13 via git worktrees.
+
+### Added
+
+- New Ruby language adapter (`crates/codeate-core/src/adapters/ruby.rs`), parsing via
+  `tree-sitter-ruby 0.23.1` -- no version substitution needed.
+- Structurally closer to the Python adapter than any Tier 1 language implemented so
+  far: no static type syntax at all, so no `TypeRef` is ever produced (documented as
+  correct, not a gap), and every reference/call resolution is name-based/best-effort,
+  carrying Python's duck-typing caveat.
+- `class`/`module` both map onto `SyntaxKind::Class` (no dedicated namespace/mixin-only
+  kind in the canonical model, same posture as Kotlin's `object`).
+  `include`/`extend`/`prepend` resolve to `IMPLEMENTS` edges from the including
+  class/module to the named module. `attr_accessor`/`attr_reader`/`attr_writer`
+  synthesize one `Variable` entity per named attribute (the generated reader/writer
+  methods themselves are not synthesized, a documented gap matching Kotlin's
+  data-class treatment). Instance (`@x`) and class (`@@x`) variables extracted as
+  `Variable` entities per assignment site. `require`/`require_relative` always
+  resolve to an `external-module` placeholder. `resolve_exports` exports every
+  top-level class/module unconditionally -- Ruby has no file-level privacy keyword
+  analogous to Python's underscore or Kotlin's modifiers.
+- Cross-adapter test extended with a Ruby fixture exercising `include`-derived
+  `IMPLEMENTS`; the fixture's own `CALLS` resolution surfaced that the adapter only
+  treats parenthesized receiverless calls (`helper()`) as `CALLS` sites, not bare
+  no-parens calls (`helper`) -- a legitimate pre-existing adapter limitation, worked
+  around in the fixture rather than patched.
+
+### Known gaps (documented)
+
+- Blocks/procs/lambdas (`{ ... }`, `do ... end`, `->`, `lambda`/`proc`) are out of
+  scope: a call's attached block is never walked, and block/lambda literals aren't
+  extracted as entities.
+- A bare (no-parens, no-receiver) method call is not recognized as a `CALLS` site --
+  only `helper()`/`helper(x)` is.
+- Open classes/monkey-patching need no special handling (redeclaration produces the
+  same derived `EntityId`, same as any other adapter).
+
+## [Phase 17.8] — C++ Language Adapter
+
+Sub-phase of Phase 17, implemented in parallel with 17.9/17.13 via git worktrees.
+
+### Added
+
+- New C++ language adapter (`crates/codeate-core/src/adapters/cpp.rs`), parsing via
+  `tree-sitter-cpp 0.23.4` -- no version substitution needed. Structurally extends
+  C's adapter (17.7) with C++'s OOP layer.
+- Classes/structs with single and multiple inheritance: every `base_class_clause`
+  entry becomes an `EXTENDS` edge -- access specifiers are read and deliberately
+  discarded, since the canonical model has no "private inheritance" concept. This
+  means C++, unlike every other OOP adapter in this codebase, never produces
+  `IMPLEMENTS` -- even a pure-virtual "interface" base is `EXTENDS`.
+- Namespaces map onto nested `Module` entities. Templates: type-parameter names
+  captured as `Generic` symbols (not wired into the main pipeline, same posture
+  Go/Rust/Java/C#'s own generics already carry). Operator overloads map to a plain
+  `Method` named after the grammar's own operator text (e.g. `"operator+"`).
+  Virtual/pure-virtual methods map to a `Method` with no body (mirroring Java's
+  interface-signature treatment).
+- `OVERRIDES` resolves only from an explicit `override` specifier matched by name
+  against a base-declared method, repo-wide; an unmatched `override` gets an explicit
+  `unresolved_symbol` placeholder rather than being silently dropped.
+- `.h` detection now resolves to C++ rather than staying `Unknown` (`detect.rs`'s
+  prior "ambiguous, deferred" stance is resolved here): `tree-sitter-cpp` parses
+  C-style headers fine, and C++ is the more common modern convention for a bare `.h`.
+- Cross-adapter test extended with a C++ fixture -- the first in this suite to check
+  `impact_of` via `EXTENDS` rather than `IMPLEMENTS`, and the first to exercise
+  `OVERRIDES`.
+
+### Known gaps (documented)
+
+- `#include` resolution -- same gap as C's adapter; the preprocessor pass isn't run
+  by `tree-sitter-cpp`.
+- Out-of-line method definitions (`Foo::bar() { ... }`): the in-class declaration
+  still produces the `Method` entity, but the out-of-line body isn't attached to it or
+  separately modeled.
+- Implicit overriding (a virtual method sharing a base's signature without the
+  `override` keyword) is not detected -- only the explicit specifier is the signal.
+- `sized_type_specifier` combinations and function-pointer types fall through to
+  `TypeRef::Unresolved`, same posture as C's adapter.
+
 ## [Phase 17.7] — C Language Adapter
 
 Sub-phase of Phase 17, implemented in parallel with 17.5/17.6 via git worktrees.

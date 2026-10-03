@@ -28,10 +28,15 @@ pub fn default_registry() -> LanguageRegistry {
     registry.register(LanguageDescriptor::new(LanguageId::known("go")).with_extensions(["go"]));
     registry
         .register(LanguageDescriptor::new(LanguageId::known("java")).with_extensions(["java"]));
-    // `.c` only, deliberately -- `.h` is ambiguous between C and C++ (a
-    // future sub-phase, 17.8) and isn't registered here, so a header file
-    // detects as Unknown rather than being guessed at.
+    // `.c` only, deliberately -- `.h` is ambiguous between C and C++ and is
+    // registered under C++ below (17.8) rather than C, since `tree-sitter-cpp`
+    // parses C-style headers fine too and C++ is the more common modern
+    // convention for a bare `.h` in a mixed-language codebase.
     registry.register(LanguageDescriptor::new(LanguageId::known("c")).with_extensions(["c"]));
+    registry.register(
+        LanguageDescriptor::new(LanguageId::known("cpp"))
+            .with_extensions(["cpp", "cc", "cxx", "hpp", "h", "hh"]),
+    );
     registry
         .register(LanguageDescriptor::new(LanguageId::known("csharp")).with_extensions(["cs"]));
     registry.register(
@@ -171,11 +176,26 @@ mod tests {
     }
 
     #[test]
-    fn does_not_detect_a_header_file_as_c() {
-        // `.h` is ambiguous between C and C++ (a future sub-phase) -- not
-        // registered, so it stays Unknown rather than being guessed at.
+    fn detects_a_header_file_as_cpp_not_c() {
+        // `.h` is ambiguous between C and C++ -- registered under C++ (17.8),
+        // not C, rather than being guessed at per-file.
         let registry = default_registry();
-        assert_eq!(detect_by_extension(Path::new("include/shape.h"), &registry), None);
+        assert_eq!(
+            detect_by_extension(Path::new("include/shape.h"), &registry),
+            Some(LanguageId::known("cpp"))
+        );
+    }
+
+    #[test]
+    fn detects_cpp_by_extension() {
+        let registry = default_registry();
+        for ext in ["cpp", "cc", "cxx", "hpp", "hh"] {
+            assert_eq!(
+                detect_by_extension(Path::new(&format!("src/widget.{ext}")), &registry),
+                Some(LanguageId::known("cpp")),
+                "extension {ext} should detect as cpp"
+            );
+        }
     }
 
     #[test]

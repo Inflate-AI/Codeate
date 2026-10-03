@@ -729,3 +729,226 @@ fn kotlin_adapter_produces_equivalent_implements_query_behavior_to_java_rust_pyt
         );
     }
 }
+
+/// Phase 17.8 task 7: extend the fixture with a C++ one. Unlike every other
+/// adapter in this suite, C++'s `resolve_structural` maps *every* base-class
+/// relation to `EXTENDS` -- there is no separate `IMPLEMENTS` edge, even for
+/// a pure-virtual "interface" base (see `adapters::cpp`'s own module doc
+/// comment: the canonical model has no "private inheritance" concept, and
+/// this adapter deliberately doesn't try to distinguish "implements an
+/// abstract interface" from "extends a concrete base" the way Kotlin/Dart's
+/// `IMPLEMENTS`-for-abstract-bases convention does). So this fixture checks
+/// `impact_of` via `EXTENDS` rather than `IMPLEMENTS`, and separately checks
+/// `OVERRIDES` (resolved from Circle's explicit `override` specifier against
+/// Shape's virtual `area`), which no prior fixture in this file exercises.
+#[test]
+fn cpp_adapter_produces_equivalent_extends_query_behavior_to_every_other_adapter() {
+    let cpp_repo = TempRepo::new(&[
+        (
+            "shape.hpp",
+            "class Shape {\npublic:\n  virtual double area() = 0;\n};\n",
+        ),
+        (
+            "circle.cpp",
+            "class Circle : public Shape {\npublic:\n  double area() override { return helper(); }\nprivate:\n  double helper() { return 0; }\n};\n",
+        ),
+    ]);
+
+    let cpp_result = analyze(&cpp_repo);
+    let (cpp_graph, cpp_report) = Graph::build(
+        cpp_result.syntax_entities.clone(),
+        cpp_result.symbols.clone(),
+        cpp_result.edges.clone(),
+    );
+    assert!(cpp_report.is_clean());
+
+    let cpp_engine = QueryEngine::new(&cpp_graph);
+
+    // Structural relationship: Circle extends Shape across files -- C++
+    // produces EXTENDS here, not IMPLEMENTS, unlike Kotlin/Dart's
+    // IMPLEMENTS-for-abstract-bases convention.
+    let cpp_shape = cpp_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("C++ Shape symbol");
+    let cpp_impact = cpp_engine.impact_of(&cpp_shape.id);
+    assert!(
+        cpp_impact
+            .iter()
+            .any(|id| cpp_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "C++: Circle should be in Shape's impact set via EXTENDS"
+    );
+
+    // Same-file call: Circle::area calls helper (both declared in
+    // circle.cpp, matching the same-file-call limitation every other
+    // fixture in this suite already documents).
+    let cpp_helper = cpp_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("C++ helper symbol");
+    let cpp_callers = cpp_engine.callers_of(&cpp_helper.id);
+    assert!(
+        cpp_callers.iter().any(|s| s.name == "area"),
+        "C++: area should call helper"
+    );
+
+    for kind in [
+        EdgeKind::Calls,
+        EdgeKind::References,
+        EdgeKind::Extends,
+        EdgeKind::Overrides,
+    ] {
+        assert!(
+            cpp_result.edges.iter().any(|e| e.kind == kind),
+            "C++: expected at least one {kind:?} edge"
+        );
+    }
+    // The correct absence: C++'s adapter never produces IMPLEMENTS -- every
+    // base relation, abstract or not, is EXTENDS (see the module doc comment
+    // above).
+    assert!(!cpp_result
+        .edges
+        .iter()
+        .any(|e| e.kind == EdgeKind::Implements));
+}
+
+/// Phase 17.9 task 7: extend the fixture with a Ruby one. Ruby's mixin
+/// composition (`include`) is read directly off a class body's own
+/// top-level calls (see `adapters::ruby`'s own module doc comment) and
+/// resolved into an `IMPLEMENTS` edge -- the same edge kind Java's explicit
+/// `implements` keyword and Kotlin's bare `: SuperType` entry both produce,
+/// so the *query behavior* for "Circle gains Shape's contract" matches every
+/// other adapter in this suite despite Ruby having no static type system at
+/// all to drive that resolution.
+#[test]
+fn ruby_adapter_produces_equivalent_implements_query_behavior_to_java_kotlin_rust_and_python() {
+    let ruby_repo = TempRepo::new(&[
+        ("shape.rb", "module Shape\n  def area\n    0\n  end\nend\n"),
+        (
+            "circle.rb",
+            "require_relative 'shape'\n\nclass Circle\n  include Shape\n\n  def compute\n    helper()\n  end\n\n  def helper\n    0\n  end\nend\n",
+        ),
+    ]);
+
+    let ruby_result = analyze(&ruby_repo);
+    let (ruby_graph, ruby_report) = Graph::build(
+        ruby_result.syntax_entities.clone(),
+        ruby_result.symbols.clone(),
+        ruby_result.edges.clone(),
+    );
+    assert!(ruby_report.is_clean());
+
+    let ruby_engine = QueryEngine::new(&ruby_graph);
+
+    // Structural relationship: Circle gains Shape's contract across files via
+    // `include`, exactly as Java's cross-file explicit IMPLEMENTS and
+    // Kotlin's cross-file bare-`:` IMPLEMENTS both do.
+    let ruby_shape = ruby_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("Ruby Shape symbol");
+    let ruby_impact = ruby_engine.impact_of(&ruby_shape.id);
+    assert!(
+        ruby_impact
+            .iter()
+            .any(|id| ruby_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "Ruby: Circle should be in Shape's impact set via include-derived IMPLEMENTS"
+    );
+
+    // Same-file call: compute calls helper (both declared in circle.rb,
+    // matching the same-file-call limitation every other fixture in this
+    // suite already documents).
+    let ruby_helper = ruby_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("Ruby helper symbol");
+    let ruby_callers = ruby_engine.callers_of(&ruby_helper.id);
+    assert!(
+        ruby_callers.iter().any(|s| s.name == "compute"),
+        "Ruby: compute should call helper"
+    );
+
+    // No bare identifier/ivar reference site exists in this fixture (only
+    // method calls, a mixin, and a require) -- unlike every other fixture in
+    // this file, so References is deliberately not asserted here.
+    for kind in [EdgeKind::Calls, EdgeKind::Implements, EdgeKind::Imports] {
+        assert!(
+            ruby_result.edges.iter().any(|e| e.kind == kind),
+            "Ruby: expected at least one {kind:?} edge"
+        );
+    }
+}
+
+/// Phase 17.13 task 7: extend the fixture with a Dart one. Dart's explicit
+/// `implements` keyword resolves into the same `IMPLEMENTS` edge Java's
+/// explicit keyword, Kotlin's bare `:` entry, and Ruby's `include` all
+/// produce, so the *query behavior* for interface satisfaction matches every
+/// other adapter in this suite, including across files via Dart's explicit
+/// `import` (resolved to an external-package placeholder the same way
+/// Java/Kotlin's own `import` is).
+#[test]
+fn dart_adapter_produces_equivalent_implements_query_behavior_to_java_kotlin_and_ruby() {
+    let dart_repo = TempRepo::new(&[
+        ("shape.dart", "abstract class Shape {\n  double area();\n}\n"),
+        (
+            "circle.dart",
+            "import 'shape.dart';\n\nclass Circle implements Shape {\n  double area() {\n    return helper();\n  }\n\n  double helper() {\n    return 0;\n  }\n}\n",
+        ),
+    ]);
+
+    let dart_result = analyze(&dart_repo);
+    let (dart_graph, dart_report) = Graph::build(
+        dart_result.syntax_entities.clone(),
+        dart_result.symbols.clone(),
+        dart_result.edges.clone(),
+    );
+    assert!(dart_report.is_clean());
+
+    let dart_engine = QueryEngine::new(&dart_graph);
+
+    // Structural relationship: Circle satisfies Shape across files, exactly
+    // as Java's cross-file explicit IMPLEMENTS, Kotlin's cross-file bare-`:`
+    // IMPLEMENTS, and Ruby's cross-file include-derived IMPLEMENTS all do.
+    let dart_shape = dart_engine
+        .symbols_named("Shape")
+        .into_iter()
+        .next()
+        .expect("Dart Shape symbol");
+    let dart_impact = dart_engine.impact_of(&dart_shape.id);
+    assert!(
+        dart_impact
+            .iter()
+            .any(|id| dart_graph.node(id).is_some_and(|n| n.name() == "Circle")),
+        "Dart: Circle should be in Shape's impact set via explicit IMPLEMENTS"
+    );
+
+    // Same-file call: Circle.area calls helper (both declared in
+    // circle.dart, matching the same-file-call limitation every other
+    // fixture in this suite already documents).
+    let dart_helper = dart_engine
+        .symbols_named("helper")
+        .into_iter()
+        .next()
+        .expect("Dart helper symbol");
+    let dart_callers = dart_engine.callers_of(&dart_helper.id);
+    assert!(
+        dart_callers.iter().any(|s| s.name == "area"),
+        "Dart: area should call helper"
+    );
+
+    for kind in [
+        EdgeKind::Calls,
+        EdgeKind::References,
+        EdgeKind::Implements,
+        EdgeKind::Imports,
+    ] {
+        assert!(
+            dart_result.edges.iter().any(|e| e.kind == kind),
+            "Dart: expected at least one {kind:?} edge"
+        );
+    }
+}

@@ -38,6 +38,11 @@ pub fn default_registry() -> LanguageRegistry {
         LanguageDescriptor::new(LanguageId::known("kotlin")).with_extensions(["kt", "kts"]),
     );
     registry.register(
+        LanguageDescriptor::new(LanguageId::known("ruby"))
+            .with_extensions(["rb"])
+            .with_shebang_interpreters(["ruby"]),
+    );
+    registry.register(
         LanguageDescriptor::new(LanguageId::known("markdown")).with_extensions(["md", "markdown"]),
     );
     registry.register(LanguageDescriptor::new(LanguageId::known("toml")).with_extensions(["toml"]));
@@ -167,6 +172,25 @@ mod tests {
         assert_eq!(
             detect_by_extension(Path::new("src/Main.kt"), &registry),
             Some(LanguageId::known("kotlin"))
+        );
+    }
+
+    #[test]
+    fn detects_ruby_by_extension() {
+        let registry = default_registry();
+        assert_eq!(
+            detect_by_extension(Path::new("app/models/shape.rb"), &registry),
+            Some(LanguageId::known("ruby"))
+        );
+    }
+
+    #[test]
+    fn detects_ruby_from_a_direct_interpreter_shebang() {
+        let registry = default_registry();
+        let content = b"#!/usr/bin/ruby\nputs 'hi'\n";
+        assert_eq!(
+            detect_by_content(content, &registry),
+            Some(LanguageId::known("ruby"))
         );
     }
 

@@ -5,6 +5,7 @@ pub mod java;
 pub mod javascript;
 pub mod kotlin;
 pub mod python;
+pub mod ruby;
 pub mod rust;
 pub mod typescript;
 
@@ -17,6 +18,7 @@ pub use java::JavaAdapter;
 pub use javascript::JavaScriptAdapter;
 pub use kotlin::KotlinAdapter;
 pub use python::PythonAdapter;
+pub use ruby::RubyAdapter;
 pub use rust::RustAdapter;
 pub use typescript::TypeScriptAdapter;
 
@@ -39,6 +41,7 @@ pub fn default_adapters() -> HashMap<LanguageId, Box<dyn DynLanguageAdapter>> {
     adapters.insert(LanguageId::known("c"), Box::new(CAdapter));
     adapters.insert(LanguageId::known("csharp"), Box::new(CSharpAdapter));
     adapters.insert(LanguageId::known("kotlin"), Box::new(KotlinAdapter));
+    adapters.insert(LanguageId::known("ruby"), Box::new(RubyAdapter));
     adapters
 }
 
@@ -98,6 +101,12 @@ mod tests {
     fn default_adapters_registers_kotlin() {
         let adapters = default_adapters();
         assert!(adapters.contains_key(&LanguageId::known("kotlin")));
+    }
+
+    #[test]
+    fn default_adapters_registers_ruby() {
+        let adapters = default_adapters();
+        assert!(adapters.contains_key(&LanguageId::known("ruby")));
     }
 
     #[test]

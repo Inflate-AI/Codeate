@@ -23,3 +23,4 @@ tree-sitter-javascript.workspace = true
 tree-sitter-c.workspace = true
 tree-sitter-c-sharp.workspace = true
 tree-sitter-kotlin-ng.workspace = true
+tree-sitter-ruby.workspace = true

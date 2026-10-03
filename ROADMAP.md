@@ -301,7 +301,8 @@ agents, other developer systems), per README's "Codeate as Infrastructure".
 
 ## Phase 17 — Additional Language Adapters
 **Status:** in progress — unpaused 2026-09-30 (batches 1-2 done: Go, TypeScript,
-JavaScript, Java, C#, Kotlin, C all closed; batch 3 planning pending, see `TASKS.md`)
+JavaScript, Java, C#, Kotlin, C all closed; batch 3 planned 2026-10-03 — C++, Ruby,
+Dart, see `TASKS.md`)
 
 *Architecture stage: Language Adapters (breadth).*
 

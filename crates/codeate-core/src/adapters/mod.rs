@@ -1,4 +1,5 @@
 pub mod c;
+pub mod cpp;
 pub mod csharp;
 pub mod go;
 pub mod java;
@@ -11,6 +12,7 @@ pub mod typescript;
 use std::collections::HashMap;
 
 pub use c::CAdapter;
+pub use cpp::CppAdapter;
 pub use csharp::CSharpAdapter;
 pub use go::GoAdapter;
 pub use java::JavaAdapter;
@@ -37,6 +39,7 @@ pub fn default_adapters() -> HashMap<LanguageId, Box<dyn DynLanguageAdapter>> {
     adapters.insert(LanguageId::known("java"), Box::new(JavaAdapter));
     adapters.insert(LanguageId::known("javascript"), Box::new(JavaScriptAdapter));
     adapters.insert(LanguageId::known("c"), Box::new(CAdapter));
+    adapters.insert(LanguageId::known("cpp"), Box::new(CppAdapter));
     adapters.insert(LanguageId::known("csharp"), Box::new(CSharpAdapter));
     adapters.insert(LanguageId::known("kotlin"), Box::new(KotlinAdapter));
     adapters
@@ -98,6 +101,12 @@ mod tests {
     fn default_adapters_registers_kotlin() {
         let adapters = default_adapters();
         assert!(adapters.contains_key(&LanguageId::known("kotlin")));
+    }
+
+    #[test]
+    fn default_adapters_registers_cpp() {
+        let adapters = default_adapters();
+        assert!(adapters.contains_key(&LanguageId::known("cpp")));
     }
 
     #[test]

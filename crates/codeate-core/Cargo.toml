@@ -25,3 +25,4 @@ tree-sitter-c-sharp.workspace = true
 tree-sitter-kotlin-ng.workspace = true
 tree-sitter-cpp.workspace = true
 tree-sitter-ruby.workspace = true
+tree-sitter-dart.workspace = true

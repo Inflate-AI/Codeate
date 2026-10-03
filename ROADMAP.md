@@ -300,21 +300,23 @@ agents, other developer systems), per README's "Codeate as Infrastructure".
 ---
 
 ## Phase 17 — Additional Language Adapters
-**Status:** in progress — unpaused 2026-09-30 (batches 1-3 done: Go, TypeScript,
-JavaScript, Java, C#, Kotlin, C, C++, Ruby, Dart all closed; batch 4 planning
-pending, see `TASKS.md`)
+**Status:** done — **closed 2026-10-03 with scope frozen early, by explicit user
+decision.** Batches 1-3 shipped 12 languages (Go, TypeScript, JavaScript, Java, C#,
+Kotlin, C, C++, Ruby, Dart, plus Rust/Python from Phases 4/15); the remaining Tier 1
+(PHP, Swift, Scala) and all of Tier 2 are deferred to a future version rather than
+required for this phase to close. See `CHANGELOG.md`'s `[Phase 17]` entry.
 
 *Architecture stage: Language Adapters (breadth).*
 
 Expand language coverage, reusing the Phase 4/15 pattern, now parallelized across
 worktrees/subagents (batches of 2-3) per the approach in
 `C:\Users\saran\.claude\plans\for-adding-support-for-refactored-spindle.md`.
-**Closing condition for this phase (revised 2026-09-30):** Codeate has a
-`LanguageAdapter` for every Tier 1 + Tier 2 general-purpose language below — Tier 3
-(enterprise/legacy/niche) is deferred past this phase, not required for it to close.
-Rationale: the user wants solid cross-language benchmarking data (Phase 18.1) before
-release, which needs real language breadth, not just the 3-language core. (Rust and
-Python are already covered by Phases 4 and 15; Go by 17.1.)
+**Closing condition (revised twice):** originally (2026-09-30) required every Tier 1
++ Tier 2 language before closing, so Phase 18's benchmarking would have real language
+breadth to work with. Revised again on 2026-10-03: the user chose to freeze language
+coverage after batch 3 and move to Phase 18 now rather than continue the breadth
+push — the condition above is kept here as history, not as this phase's actual
+closing bar.
 
 Template/config formats (Vue/Svelte/Astro SFCs, Blade, Ansible YAML, Terraform, Jupyter
 notebooks, Spring Boot config, Perl XS) remain **out of scope**, per the 2026-09-30
@@ -327,20 +329,21 @@ the one that now waits. Two reorders in one day is unusual; both are explicit,
 timestamped user decisions rather than assumptions, per `CLAUDE.md`'s "phases reordered
 only with user approval" rule.
 
-Required set, in implementation order:
+Shipped, in implementation order:
 
 **Tier 1 — mainstream general-purpose:**
-~~Go~~ (17.1, done), ~~TypeScript~~ (17.2, done), ~~JavaScript~~ (17.3, done),
-~~Java~~ (17.4, done), ~~C#~~ (17.5, done), ~~Kotlin~~ (17.6, done), ~~C~~ (17.7,
-done), ~~C++~~ (17.8, done), ~~Ruby~~ (17.9, done), PHP, Swift, Scala,
-~~Dart~~ (17.13, done)
+~~Go~~ (17.1), ~~TypeScript~~ (17.2), ~~JavaScript~~ (17.3), ~~Java~~ (17.4),
+~~C#~~ (17.5), ~~Kotlin~~ (17.6), ~~C~~ (17.7), ~~C++~~ (17.8), ~~Ruby~~ (17.9),
+~~Dart~~ (17.13).
 
-**Tier 2 — scripting / data / infra:**
-SQL, Shell (bash/sh), PowerShell, Perl, Lua, R, Julia
+**Deferred to a future version** (not reopening this phase — see
+`CHANGELOG.md`'s `[Phase 17]` entry):
 
-**Tier 3 — enterprise / legacy / niche (deferred past this phase's closing condition):**
-VB.NET, Objective-C, Elixir, Solidity, Zig, Verilog, SystemVerilog, Nix, GDScript,
-ReScript, Luau
+- **Tier 1 remaining:** PHP, Swift, Scala.
+- **Tier 2 — scripting / data / infra:** SQL, Shell (bash/sh), PowerShell, Perl, Lua,
+  R, Julia.
+- **Tier 3 — enterprise / legacy / niche:** VB.NET, Objective-C, Elixir, Solidity,
+  Zig, Verilog, SystemVerilog, Nix, GDScript, ReScript, Luau.
 
 Per-language sub-phases:
 
@@ -358,12 +361,13 @@ Per-language sub-phases:
 ---
 
 ## Phase 18 — 1.0.0 Beta Hardening & Release
-**Status:** planned, on hold (task breakdown exists in `TASKS.md`; implementation not
-started — waits until Phase 17's Tier 1 + Tier 2 close, per user decision 2026-09-30)
+**Status:** planned, not yet started — now the current phase as of 2026-10-03
+(Phase 17 closed with frozen scope; see above). Task breakdown drafted in `TASKS.md`,
+needs a fresh approval pass before implementation begins per the usual workflow.
 
-Production-readiness pass. 18.1 (performance & comparative benchmarking) specifically
-needs Phase 17's expanded language coverage to be meaningful — benchmarking 3 languages
-vs. 21 is a very different exercise — hence the resequencing.
+Production-readiness pass. 18.1 (performance & comparative benchmarking) benchmarks
+the 12 languages Phase 17 actually shipped, not the originally-planned full Tier 1 +
+Tier 2 set.
 
 - Performance benchmarking on large real-world repositories (all 3 supported
   languages), with recorded baselines to catch regressions.

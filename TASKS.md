@@ -3,121 +3,32 @@
 Task breakdown for the **current phase only**. Cleared/archived when the phase closes
 (its summary moves to `CHANGELOG.md`).
 
-## Current phase: Phase 17 — Additional Language Adapters
+## Phase 17 — Additional Language Adapters: closed (see `CHANGELOG.md`)
 
-Unpaused 2026-09-30. Closing condition narrowed to Tier 1 + Tier 2 (Tier 3 deferred
-past this phase; see `ROADMAP.md`). Implemented in parallel batches of 2-3 languages
-via git worktrees + subagents, per
-`C:\Users\saran\.claude\plans\for-adding-support-for-refactored-spindle.md`.
-
-**Process guardrail (from 17.1's process failure):** a worktree agent implements,
-tests, and reports back only. It never updates `CHANGELOG.md`/`TASKS.md`/`ROADMAP.md`
-status, never declares its sub-phase closed, and never claims an approval it wasn't
-actually given. The coordinator reviews each diff directly, confirms tests/clippy are
-actually clean, merges to `main`, presents Happenings to the user, and only then does
-closing bookkeeping — after genuine user confirmation, not before.
-
-### Sub-phase queue
-
-**Tier 1 — mainstream general-purpose** (3 remaining)
-- [x] 17.1 Go
-- [x] 17.2 TypeScript — batch 1, closed
-- [x] 17.3 JavaScript — batch 1, closed
-- [x] 17.4 Java — batch 1, closed
-- [x] 17.5 C# — batch 2, closed
-- [x] 17.6 Kotlin — batch 2, closed
-- [x] 17.7 C — batch 2, closed
-- [x] 17.8 C++ — batch 3, closed
-- [x] 17.9 Ruby — batch 3, closed
-- [ ] 17.10 PHP
-- [ ] 17.11 Swift
-- [ ] 17.12 Scala
-- [x] 17.13 Dart — batch 3, closed
-
-**Tier 2 — scripting / data / infra**
-- [ ] 17.14 SQL
-- [ ] 17.15 Shell (bash/sh)
-- [ ] 17.16 PowerShell
-- [ ] 17.17 Perl
-- [ ] 17.18 Lua
-- [ ] 17.19 R
-- [ ] 17.20 Julia
-
-### Batch 1 — TypeScript, JavaScript, Java (closed 2026-09-30, see `CHANGELOG.md`)
-
-Implemented in parallel via 3 worktrees, reviewed and merged sequentially into `main`.
-Verified independently (not just agent self-reports) after each merge — full
-`cargo test --workspace` + `cargo clippy --workspace --all-targets -- -D warnings`
-clean, all 5 cross-adapter tests passing.
-
-Lessons for future batches: the shared `CARGO_TARGET_DIR` strategy filled D:\
-completely during verification builds (Windows MSVC linker PDB/link limits plus
-multiple parsers' build artifacts add up fast) — clear `target/debug/incremental` and
-stale `.pdb` files proactively between batches rather than waiting for a hard failure.
-One merged worktree directory resisted `git worktree remove` (lingering file handle,
-harmless) — pruned from git's tracking; the leftover directory can be removed later
-once nothing holds it open.
-
-### Batch 2 — C#, Kotlin, C (closed 2026-09-30, see `CHANGELOG.md`)
-
-Implemented in parallel via 3 worktrees, reviewed and merged sequentially into `main`.
-Verified independently after each merge — full `cargo test --workspace` (0 failures
-across every suite) + `cargo clippy --workspace --all-targets -- -D warnings` clean,
-all 8 cross-adapter tests passing.
-
-Notable deviation: Kotlin (17.6) substituted `tree-sitter-kotlin-ng` for the originally
-planned `tree-sitter-kotlin`, which doesn't type-check against this workspace's
-`tree-sitter 0.25` — verified before writing code, documented in `CHANGELOG.md`.
-
-Lessons for batch 3: disk hit critical levels twice more during verification, same
-fix as batch 1 (clear `target/debug/incremental` + stale `.pdb`s). This is now a
-recurring cost of the shared-`CARGO_TARGET_DIR` strategy — worth reconsidering before
-batch 3 (e.g. clearing between every single merge, not just between batches).
-
-### Batch 3 — C++, Ruby, Dart (closed 2026-10-03, see `CHANGELOG.md`)
-
-Implemented in parallel via 3 worktrees, reviewed and merged sequentially into `main`.
-Verified independently after each merge — full `cargo test --workspace` (549 lib
-tests, 0 failures across every suite) + `cargo clippy --workspace --all-targets --
--D warnings` clean, all 11 cross-adapter tests passing.
-
-No parser substitutions needed this batch — `tree-sitter-cpp` 0.23.4,
-`tree-sitter-ruby` 0.23.1, and `tree-sitter-dart` 0.2.0 (the latter verified
-compatible via its `tree-sitter-language` shim dependency, the same pattern
-`tree-sitter-kotlin-ng` uses, before any adapter code was written) all compiled
-clean against this workspace's `tree-sitter 0.25`.
-
-Lessons for batch 4: disk hit 100% full twice during this batch, worse than before —
-three worktrees building concurrently on the same `D:\` volume outpaces the
-clear-incremental-before-final-build mitigation from batch 2. Fixes applied
-in-the-moment: removed merged worktrees' full `target/` dirs (not just incremental)
-right after each merge, and regenerated `Cargo.lock` from scratch once rather than
-hand-resolving a lockfile merge conflict. Also caught: a broad `git add -A` during
-merge conflict resolution briefly staged the live agent worktrees themselves as
-embedded git repos — fixed by `git rm --cached` + gitignoring `.claude/worktrees/`
-going forward. For batch 4, consider sequencing merges tighter to the finish of each
-worktree (not waiting for all three to report) to reduce the peak-concurrent-build
-window, and/or pointing `CARGO_TARGET_DIR` at a volume with more headroom per
-worktree.
-
-Tiers "17.10+" get their own planning pass before batch 4 starts — not detailed yet.
+Closed 2026-10-03 with scope frozen early by explicit user decision: 12 languages
+shipped (Go, TypeScript, JavaScript, Java, C#, Kotlin, C, C++, Ruby, Dart, plus
+Rust/Python from Phases 4/15) across batches 1-3. The remaining Tier 1 (PHP, Swift,
+Scala), all of Tier 2, and Tier 3 are deferred to a future version, not a backlog for
+this phase — see `CHANGELOG.md`'s `[Phase 17]` entry and `ROADMAP.md` for the full
+deferred list. Batch-by-batch detail (parser crates, deviations, disk-space lessons)
+lives in that same `CHANGELOG.md` entry and its sub-phase entries; not reproduced here
+per this file's own "past phases can be cleared/archived" rule.
 
 ---
 
-## Deferred: Phase 18 — 1.0.0 Beta Hardening & Release
+## Current phase: Phase 18 — 1.0.0 Beta Hardening & Release
 
-Full breakdown preserved below; implementation is on hold until Phase 17's Tier 1 +
-Tier 2 close (per user decision 2026-09-30 — solid cross-language benchmarking needs
-real language breadth first). Resumes as the current phase once Phase 17 closes.
-
-<details>
-<summary>Phase 18 draft task breakdown (click to expand)</summary>
+Promoted to the current phase 2026-10-03 when Phase 17 closed. **Not yet approved for
+implementation** — this breakdown is carried over from Phase 17's original deferral
+note; it needs a fresh approval pass (per `CLAUDE.md` workflow step 2) before any TDD
+work starts, since 18.1 in particular depends on which languages Phase 17 actually
+shipped (12, not the originally-planned full Tier 1 + Tier 2 set).
 
 ### Proposed sub-areas (each independently testable, same closing discipline as a
 language sub-phase: planned → TDD → Happenings → closed with its own commits)
 
-- [ ] 18.1 **Performance & Comparative Benchmarking.** Benchmark every Tier 1/2
-  language once implemented, compared against Code Review Graph and Graphify on
+- [ ] 18.1 **Performance & Comparative Benchmarking.** Benchmark each of the 12
+  languages Phase 17 shipped, compared against Code Review Graph and Graphify on
   identical fixtures (both have deterministic, offline, no-LLM code paths). See full
   8-task breakdown below.
 - [ ] 18.2 **Correctness/robustness hardening.** Malformed/edge-case input handling
@@ -183,5 +94,3 @@ language sub-phase: planned → TDD → Happenings → closed with its own commi
 
 1. `docs/versioning-policy.md`: SemVer for canonical model, storage format, API.
 2. Explicit 1.0.0-beta scope statement.
-
-</details>

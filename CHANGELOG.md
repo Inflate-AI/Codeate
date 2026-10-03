@@ -7,6 +7,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing closed yet.
 
+## [Phase 17] — Additional Language Adapters
+
+Closed 2026-10-03 by explicit user decision: **scope frozen early**. Phase 17 was
+originally scoped (2026-09-30) to close only once every Tier 1 + Tier 2 language had
+an adapter; the user revised that after batch 3 landed, choosing to move on to Phase
+18 (1.0.0 beta hardening & release) now rather than continue the language-breadth
+push. See each sub-phase entry below/above for implementation detail.
+
+### Shipped (12 languages, 10 sub-phases: 17.1-17.9, 17.13, plus Rust/Python from
+Phases 4/15)
+
+Go, TypeScript, JavaScript, Java, C#, Kotlin, C, C++, Ruby, Dart.
+
+### Deferred to a future version (not part of this phase's closing scope)
+
+- **Tier 1 remaining:** PHP, Swift, Scala.
+- **Tier 2:** SQL, Shell (bash/sh), PowerShell, Perl, Lua, R, Julia.
+- **Tier 3 (already deferred before this closure):** VB.NET, Objective-C, Elixir,
+  Solidity, Zig, Verilog, SystemVerilog, Nix, GDScript, ReScript, Luau.
+
+Revisiting any of these is a new, independently-planned sub-phase whenever language
+breadth becomes a priority again — not a reopening of this phase.
+
 ## [Phase 17.13] — Dart Language Adapter
 
 Sub-phase of Phase 17, implemented in parallel with 17.8/17.9 via git worktrees.

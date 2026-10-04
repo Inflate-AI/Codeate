@@ -74,14 +74,14 @@ fixtures, not representative source; see the manifest's `ignore_globs`).
 
 | Language | Tool | Cold (s) | Incremental (s) | Peak Memory (MB) | Deterministic |
 |---|---|---|---|---|---|
-| rust | codeate | 11.04 | 4.81 | 175.6 | yes |
-| rust | code-review-graph | 36.59 | 1.67 | 358.9 | yes |
-| rust | graphify | 43.31 | 39.57 | 446.9 | yes |
+| rust | codeate | 18.42 | 6.00 | 175.8 | yes |
+| rust | code-review-graph | 55.24 | 1.68 | 364.8 | yes |
+| rust | graphify | 67.75 | 60.19 | 450.0 | yes |
 
 #### Coverage/depth — Rust
 
 | Tool | Entity/node kinds observed | Edge/relation kinds observed |
 |---|---|---|
-| codeate | `Expression` (6274), `Parameter` (6031), `Variable` (5243), `Method` (3066), `Statement` (2300), `Function` (1885), `Struct` (564), `Module` (740), `Test` (343), `Enum` (209), `Dependency` (207), `Interface` (32), `BuildTarget` (31), `EntryPoint` (30), `Package` (29), `Class` (1) — plus `SymbolKind`: `Symbol` (14205), `Type` (929), `Method` (2685), `Namespace` (760), `Function` (1860), `Constant` (207) | `REFERENCES` (20228), `CONTAINS` (26252), `CALLS` (19980), `DEPENDS_ON` (6642), `DECLARES` (6136), `DEFINED_IN` (6136), `IMPORTS` (5188), `OVERRIDES` (695), `INSTANTIATES` (672), `EXPORTS` (1083), `IMPLEMENTS` (516), `EXTENDS` (7) |
+| codeate | `Expression` (6274), `Parameter` (6031), `Variable` (5243), `Method` (3066), `Statement` (2300), `Function` (1885), `Struct` (564), `Module` (740), `Test` (343), `Enum` (209), `Dependency` (207), `Interface` (32), `BuildTarget` (31), `EntryPoint` (30), `Package` (29), `Class` (1) — plus `SymbolKind`: `Symbol` (14205), `Type` (929), `Method` (2685), `Namespace` (760), `Function` (1860), `Constant` (207) | `REFERENCES` (20228), `CONTAINS` (26252), `CALLS` (19980), `DEPENDS_ON` (6661), `DECLARES` (6136), `DEFINED_IN` (6136), `IMPORTS` (5188), `OVERRIDES` (695), `INSTANTIATES` (672), `EXPORTS` (1083), `IMPLEMENTS` (516), `EXTENDS` (7) |
 | code-review-graph | `Function` (9355), `File` (1381), `Class` (871), `Test` (558) | `CALLS` (108943), `CONTAINS` (10905), `IMPORTS_FROM` (7340), `TESTED_BY` (5361), `IMPLEMENTS` (520), `REFERENCES` (197) |
 | graphify | Mostly untyped: 17989/19237 node records have no `type` field; the few that do are `package` (556) or `external` (692) | `calls` (8481), `references` (12636), `contains` (10989), `imports_from` (6682), `method` (3064), `case_of` (696), `depends_on` (692), `implements` (231), `defines` (11), `inherits` (1), `imports` (5) |

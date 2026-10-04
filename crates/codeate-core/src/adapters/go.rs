@@ -16,9 +16,27 @@ use crate::types::TypeRef;
 /// primitive lists) they're common enough return/parameter types to classify
 /// explicitly rather than falling through to `Named`.
 const PRIMITIVE_TYPES: &[&str] = &[
-    "bool", "string", "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16",
-    "uint32", "uint64", "uintptr", "byte", "rune", "float32", "float64", "complex64",
-    "complex128", "error", "any",
+    "bool",
+    "string",
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "uintptr",
+    "byte",
+    "rune",
+    "float32",
+    "float64",
+    "complex64",
+    "complex128",
+    "error",
+    "any",
 ];
 
 /// The parsed form a `GoAdapter` produces: `tree-sitter`'s `Tree` paired with
@@ -116,8 +134,14 @@ impl LanguageAdapter for GoAdapter {
             let Some(scope) = scope_tree.scope_of(&fn_entity.id) else {
                 continue;
             };
-            let (body_symbols, body_edges) =
-                resolve_body(*body, &ast.source, &fn_symbol, &scope_tree, scope, symbol_table);
+            let (body_symbols, body_edges) = resolve_body(
+                *body,
+                &ast.source,
+                &fn_symbol,
+                &scope_tree,
+                scope,
+                symbol_table,
+            );
             symbols.extend(body_symbols);
             edges.extend(body_edges);
         }
@@ -435,7 +459,8 @@ fn extract_parameters(
 ) {
     let mut cursor = params.walk();
     for param in params.children(&mut cursor) {
-        if param.kind() != "parameter_declaration" && param.kind() != "variadic_parameter_declaration"
+        if param.kind() != "parameter_declaration"
+            && param.kind() != "variadic_parameter_declaration"
         {
             continue;
         }
@@ -462,7 +487,10 @@ fn extract_body(
     entities: &mut Vec<SyntaxEntity>,
     edges: &mut Vec<Edge>,
 ) {
-    let Some(stmt_list) = block.named_child(0).filter(|n| n.kind() == "statement_list") else {
+    let Some(stmt_list) = block
+        .named_child(0)
+        .filter(|n| n.kind() == "statement_list")
+    else {
         return;
     };
 
@@ -599,7 +627,20 @@ fn resolve_body<'a>(
                 let resolved = scope_tree
                     .lookup(scope, ident)
                     .and_then(|id| symbol_table.find_by_syntax_id(id))
-                    .cloned();
+                    .cloned()
+                    .or_else(|| {
+                        // The scope tree only covers this file's own
+                        // entities, so a call to a function declared in
+                        // another file of the same package never resolves
+                        // through it -- fall back to a repo-wide
+                        // best-effort name match against `symbol_table`,
+                        // mirroring the `selector_expression` branch below,
+                        // which has always searched repo-wide.
+                        symbol_table
+                            .symbols()
+                            .find(|s| s.kind == SymbolKind::Function && s.name == ident)
+                            .cloned()
+                    });
                 let target = resolved.unwrap_or_else(|| {
                     let placeholder = unresolved_symbol("unknown-local", ident);
                     symbols.push(placeholder.clone());
@@ -783,7 +824,10 @@ fn walk_block_statements<'a>(
     on_call: &mut impl FnMut(Node<'a>),
     on_composite: &mut impl FnMut(Node<'a>),
 ) {
-    let Some(stmt_list) = block.named_child(0).filter(|n| n.kind() == "statement_list") else {
+    let Some(stmt_list) = block
+        .named_child(0)
+        .filter(|n| n.kind() == "statement_list")
+    else {
         return;
     };
     let mut cursor = stmt_list.walk();
@@ -808,7 +852,9 @@ fn resolve_implements(
 ) -> Vec<Edge> {
     let mut edges = Vec::new();
 
-    let structs = file_entities.iter().filter(|e| e.kind == SyntaxKind::Struct);
+    let structs = file_entities
+        .iter()
+        .filter(|e| e.kind == SyntaxKind::Struct);
     let interfaces: Vec<&SyntaxEntity> = all_entities
         .iter()
         .filter(|e| e.kind == SyntaxKind::Interface)
@@ -904,8 +950,11 @@ fn resolve_exports(
     module_symbol: &SymbolEntity,
     symbol_table: &SymbolTable,
 ) -> Vec<Edge> {
-    const EXPORTABLE_KINDS: [SyntaxKind; 3] =
-        [SyntaxKind::Function, SyntaxKind::Struct, SyntaxKind::Interface];
+    const EXPORTABLE_KINDS: [SyntaxKind; 3] = [
+        SyntaxKind::Function,
+        SyntaxKind::Struct,
+        SyntaxKind::Interface,
+    ];
 
     let mut edges = Vec::new();
     for entity_id in declared_children(file_edges, &module_symbol_owner(file_entities)) {
@@ -1096,8 +1145,11 @@ fn extract_generic_params(
         }
         let mut name_cursor = param.walk();
         for name_node in param.children_by_field_name("name", &mut name_cursor) {
-            let symbol =
-                SymbolEntity::new(SymbolKind::Generic, owner_symbol.id.as_str(), text(name_node, src));
+            let symbol = SymbolEntity::new(
+                SymbolKind::Generic,
+                owner_symbol.id.as_str(),
+                text(name_node, src),
+            );
             edges.push(Edge::new(
                 owner_symbol.id.clone(),
                 symbol.id.clone(),
@@ -1159,7 +1211,8 @@ mod tests {
 
     #[test]
     fn a_parameter_declaration_with_comma_joined_names_produces_one_parameter_each() {
-        let (entities, _) = extract("package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n");
+        let (entities, _) =
+            extract("package main\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n");
 
         let param_names: Vec<&str> = entities
             .iter()
@@ -1190,7 +1243,11 @@ mod tests {
             .find(|e| e.kind == SyntaxKind::Method && e.name == "Area")
             .expect("Method entity");
         assert!(
-            edges.contains(&Edge::new(circle.id.clone(), area.id.clone(), EdgeKind::Declares)),
+            edges.contains(&Edge::new(
+                circle.id.clone(),
+                area.id.clone(),
+                EdgeKind::Declares
+            )),
             "Area should be declared under Circle, not the module"
         );
     }
@@ -1225,7 +1282,11 @@ mod tests {
             .iter()
             .find(|e| e.kind == SyntaxKind::Method && e.name == "Area")
             .expect("Method signature entity");
-        assert!(edges.contains(&Edge::new(shape.id.clone(), area.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            shape.id.clone(),
+            area.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -1506,7 +1567,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) = resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let value_var = r
             .entities
@@ -1527,8 +1595,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (symbols, edges) =
-            resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (symbols, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         assert!(symbols.iter().any(|s| s.name.starts_with("unknown-local")));
         assert!(edges
@@ -1538,13 +1612,18 @@ mod tests {
 
     #[test]
     fn resolves_a_free_function_call() {
-        let source =
-            "package main\n\nfunc helper() {}\n\nfunc run() {\n\thelper()\n}\n";
+        let source = "package main\n\nfunc helper() {}\n\nfunc run() {\n\thelper()\n}\n";
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let helper = r
             .entities
@@ -1560,13 +1639,79 @@ mod tests {
     }
 
     #[test]
+    fn a_free_call_to_a_function_declared_in_another_file_resolves_via_repo_wide_fallback() {
+        // Regression test for the cross-file CALLS gap found via Phase 18.1's
+        // real-world benchmarking: the scope tree only ever covered the
+        // calling file's own entities, so a call to a function declared in
+        // another file of the same package fell straight to an
+        // `unknown-local` placeholder.
+        use crate::symbols::build_symbol_table;
+
+        let adapter = GoAdapter;
+        let helper_ast = adapter.parse("package main\n\nfunc helper() {}\n").unwrap();
+        let (helper_entities, helper_edges) = adapter.extract(&helper_ast, "helper.go");
+        let caller_ast = adapter
+            .parse("package main\n\nfunc run() {\n\thelper()\n}\n")
+            .unwrap();
+        let (caller_entities, caller_edges) = adapter.extract(&caller_ast, "run.go");
+
+        let mut all_entities = helper_entities.clone();
+        all_entities.extend(caller_entities.clone());
+        let mut all_edges = helper_edges;
+        all_edges.extend(caller_edges);
+        let symbol_table = build_symbol_table(&all_entities);
+
+        let caller_module = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Module)
+            .unwrap();
+        let module_symbol = symbol_table.find_by_syntax_id(&caller_module.id).unwrap();
+
+        let (_symbols, edges) = adapter.resolve_file(
+            &caller_ast,
+            "run.go",
+            &all_entities,
+            &symbol_table,
+            &all_edges,
+            module_symbol,
+            caller_module,
+        );
+
+        let helper = helper_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Function && e.name == "helper")
+            .unwrap();
+        let helper_symbol = symbol_table.find_by_syntax_id(&helper.id).unwrap();
+        let run = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Function && e.name == "run")
+            .unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run.id).unwrap();
+
+        assert!(
+            edges.contains(&Edge::new(
+                run_symbol.id.clone(),
+                helper_symbol.id.clone(),
+                EdgeKind::Calls
+            )),
+            "expected a real CALLS edge to helper's resolved symbol, not an unresolved placeholder: {edges:?}"
+        );
+    }
+
+    #[test]
     fn resolves_a_method_call_by_best_effort_name_match() {
         let source = "package main\n\ntype Shape struct{}\nfunc (s *Shape) Area() {}\n\nfunc run(shape Shape) {\n\tshape.Area()\n}\n";
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let area = r
             .entities
@@ -1588,8 +1733,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let circle = r
             .entities
@@ -1610,8 +1761,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (symbols, edges) =
-            resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (symbols, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         assert!(symbols
             .iter()
@@ -1683,12 +1840,8 @@ mod tests {
         let (symbols, edges) = resolve_imports(&sites.imports, &ast.source, &module_symbol);
 
         assert_eq!(symbols.len(), 2);
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "external-package:fmt"));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "external-package:math"));
+        assert!(symbols.iter().any(|s| s.name == "external-package:fmt"));
+        assert!(symbols.iter().any(|s| s.name == "external-package:math"));
         assert_eq!(
             edges.iter().filter(|e| e.kind == EdgeKind::Imports).count(),
             2
@@ -1702,7 +1855,10 @@ mod tests {
         let ast = adapter.parse(source).unwrap();
         let (entities, edges) = adapter.extract(&ast, "module.go");
         let symbol_table = crate::symbols::build_symbol_table(&entities);
-        let module_symbol = symbol_table.find_by_syntax_id(&entities[0].id).unwrap().clone();
+        let module_symbol = symbol_table
+            .find_by_syntax_id(&entities[0].id)
+            .unwrap()
+            .clone();
 
         let export_edges = resolve_exports(&entities, &edges, &module_symbol, &symbol_table);
 

@@ -591,7 +591,20 @@ fn resolve_calls(
                     let resolved = scope_tree
                         .lookup(scope, ident)
                         .and_then(|id| symbol_table.find_by_syntax_id(id))
-                        .cloned();
+                        .cloned()
+                        .or_else(|| {
+                            // The scope tree only covers this file's own
+                            // entities, so a call to a function declared in
+                            // another module never resolves through it --
+                            // fall back to a repo-wide best-effort name
+                            // match against `symbol_table`, mirroring the
+                            // `Attribute` branch below, which has always
+                            // searched repo-wide.
+                            symbol_table
+                                .symbols()
+                                .find(|s| s.kind == SymbolKind::Function && s.name == ident)
+                                .cloned()
+                        });
                     let target = resolved.unwrap_or_else(|| {
                         let placeholder = unresolved_symbol("unknown-local", ident);
                         symbols.push(placeholder.clone());
@@ -1269,6 +1282,63 @@ mod tests {
             helper_symbol.id.clone(),
             EdgeKind::Calls
         )));
+    }
+
+    #[test]
+    fn a_free_call_to_a_function_declared_in_another_file_resolves_via_repo_wide_fallback() {
+        // Regression test for the cross-file CALLS gap found via Phase 18.1's
+        // real-world benchmarking: the scope tree only ever covered the
+        // calling file's own entities, so a call to a function declared in
+        // another module fell straight to an `unknown-local` placeholder.
+        use crate::symbols::build_symbol_table;
+
+        let adapter = PythonAdapter;
+        let helper_ast = adapter.parse("def helper():\n    pass\n").unwrap();
+        let (helper_entities, helper_edges) = adapter.extract(&helper_ast, "helper.py");
+        let caller_ast = adapter.parse("def run():\n    helper()\n").unwrap();
+        let (caller_entities, caller_edges) = adapter.extract(&caller_ast, "run.py");
+
+        let mut all_entities = helper_entities.clone();
+        all_entities.extend(caller_entities.clone());
+        let mut all_edges = helper_edges;
+        all_edges.extend(caller_edges);
+        let symbol_table = build_symbol_table(&all_entities);
+
+        let caller_module = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Module)
+            .unwrap();
+        let module_symbol = symbol_table.find_by_syntax_id(&caller_module.id).unwrap();
+
+        let (_symbols, edges) = adapter.resolve_file(
+            &caller_ast,
+            "run.py",
+            &all_entities,
+            &symbol_table,
+            &all_edges,
+            module_symbol,
+            caller_module,
+        );
+
+        let helper = helper_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Function && e.name == "helper")
+            .unwrap();
+        let helper_symbol = symbol_table.find_by_syntax_id(&helper.id).unwrap();
+        let run = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Function && e.name == "run")
+            .unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run.id).unwrap();
+
+        assert!(
+            edges.contains(&Edge::new(
+                run_symbol.id.clone(),
+                helper_symbol.id.clone(),
+                EdgeKind::Calls
+            )),
+            "expected a real CALLS edge to helper's resolved symbol, not an unresolved placeholder: {edges:?}"
+        );
     }
 
     #[test]

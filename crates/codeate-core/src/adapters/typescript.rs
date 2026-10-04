@@ -18,8 +18,18 @@ use crate::types::TypeRef;
 /// documented primitive sets and any future non-`predefined_type` primitive
 /// spellings.
 const PRIMITIVE_TYPES: &[&str] = &[
-    "string", "number", "boolean", "any", "void", "null", "undefined", "symbol", "never",
-    "unknown", "object", "bigint",
+    "string",
+    "number",
+    "boolean",
+    "any",
+    "void",
+    "null",
+    "undefined",
+    "symbol",
+    "never",
+    "unknown",
+    "object",
+    "bigint",
 ];
 
 /// The parsed form a `TypeScriptAdapter` produces: `tree-sitter`'s `Tree`
@@ -115,8 +125,14 @@ impl LanguageAdapter for TypeScriptAdapter {
             let Some(scope) = scope_tree.scope_of(&fn_entity.id) else {
                 continue;
             };
-            let (body_symbols, body_edges) =
-                resolve_body(*body, &ast.source, &fn_symbol, &scope_tree, scope, symbol_table);
+            let (body_symbols, body_edges) = resolve_body(
+                *body,
+                &ast.source,
+                &fn_symbol,
+                &scope_tree,
+                scope,
+                symbol_table,
+            );
             symbols.extend(body_symbols);
             edges.extend(body_edges);
         }
@@ -242,7 +258,9 @@ fn extract_item<'a>(
     exported: bool,
 ) {
     match node.kind() {
-        "class_declaration" => extract_class(node, src, parent, scope, entities, edges, sites, exported),
+        "class_declaration" => {
+            extract_class(node, src, parent, scope, entities, edges, sites, exported)
+        }
         "interface_declaration" => {
             extract_interface(node, src, parent, scope, entities, edges, sites, exported)
         }
@@ -261,7 +279,16 @@ fn extract_item<'a>(
         "import_statement" => sites.imports.push(node),
         "export_statement" => {
             if let Some(declaration) = node.child_by_field_name("declaration") {
-                extract_item(declaration, src, parent, scope, entities, edges, sites, true);
+                extract_item(
+                    declaration,
+                    src,
+                    parent,
+                    scope,
+                    entities,
+                    edges,
+                    sites,
+                    true,
+                );
             } else if let Some(export_clause) = find_child(node, "export_clause") {
                 let mut clause_cursor = export_clause.walk();
                 for specifier in export_clause.named_children(&mut clause_cursor) {
@@ -599,7 +626,20 @@ fn resolve_body<'a>(
                 let resolved = scope_tree
                     .lookup(scope, ident)
                     .and_then(|id| symbol_table.find_by_syntax_id(id))
-                    .cloned();
+                    .cloned()
+                    .or_else(|| {
+                        // The scope tree only covers this file's own
+                        // entities, so a call to a function declared in
+                        // another module never resolves through it -- fall
+                        // back to a repo-wide best-effort name match
+                        // against `symbol_table`, mirroring the
+                        // method-call branch below, which has always
+                        // searched repo-wide.
+                        symbol_table
+                            .symbols()
+                            .find(|s| s.kind == SymbolKind::Function && s.name == ident)
+                            .cloned()
+                    });
                 let target = resolved.unwrap_or_else(|| {
                     let placeholder = unresolved_symbol("unknown-local", ident);
                     symbols.push(placeholder.clone());
@@ -1023,13 +1063,20 @@ fn resolve_exports(
                 && &e.name == name
                 && matches!(
                     e.kind,
-                    SyntaxKind::Function | SyntaxKind::Class | SyntaxKind::Interface | SyntaxKind::Variable
+                    SyntaxKind::Function
+                        | SyntaxKind::Class
+                        | SyntaxKind::Interface
+                        | SyntaxKind::Variable
                 )
         }) else {
             continue;
         };
         if let Some(symbol) = symbol_table.find_by_syntax_id(&entity.id) {
-            let edge = Edge::new(module_symbol.id.clone(), symbol.id.clone(), EdgeKind::Exports);
+            let edge = Edge::new(
+                module_symbol.id.clone(),
+                symbol.id.clone(),
+                EdgeKind::Exports,
+            );
             if !edges.contains(&edge) {
                 edges.push(edge);
             }
@@ -1190,7 +1237,8 @@ mod tests {
 
     #[test]
     fn extracts_a_top_level_function_with_its_parameters() {
-        let (entities, edges) = extract("function add(a: number, b: number): number {\n  return a + b;\n}\n");
+        let (entities, edges) =
+            extract("function add(a: number, b: number): number {\n  return a + b;\n}\n");
 
         let module = &entities[0];
         let function = entities
@@ -1232,7 +1280,11 @@ mod tests {
             .find(|e| e.kind == SyntaxKind::Method && e.name == "area")
             .expect("Method entity");
         assert!(
-            edges.contains(&Edge::new(circle.id.clone(), area.id.clone(), EdgeKind::Declares)),
+            edges.contains(&Edge::new(
+                circle.id.clone(),
+                area.id.clone(),
+                EdgeKind::Declares
+            )),
             "area should be declared under Circle, not the module"
         );
     }
@@ -1250,7 +1302,11 @@ mod tests {
             .iter()
             .find(|e| e.kind == SyntaxKind::Method && e.name == "area")
             .expect("Method signature entity");
-        assert!(edges.contains(&Edge::new(shape.id.clone(), area.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            shape.id.clone(),
+            area.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -1350,7 +1406,10 @@ mod tests {
         let full = "function f(): number { return 0; }\n";
         let tree = parse_source(full);
         let node = return_type_of(&tree, full, "f");
-        assert_eq!(extract_type(node, full), TypeRef::Primitive("number".to_string()));
+        assert_eq!(
+            extract_type(node, full),
+            TypeRef::Primitive("number".to_string())
+        );
     }
 
     #[test]
@@ -1487,7 +1546,8 @@ mod tests {
         let fn_entity = entities
             .iter()
             .find(|e| {
-                (e.kind == SyntaxKind::Function || e.kind == SyntaxKind::Method) && e.name == fn_name
+                (e.kind == SyntaxKind::Function || e.kind == SyntaxKind::Method)
+                    && e.name == fn_name
             })
             .unwrap_or_else(|| panic!("no Function/Method entity named {fn_name}"))
             .clone();
@@ -1513,7 +1573,9 @@ mod tests {
     }
 
     fn body_of<'a>(tree: &'a Tree, src: &'a str, name: &str) -> Node<'a> {
-        find_matching(tree, src, name).child_by_field_name("body").unwrap()
+        find_matching(tree, src, name)
+            .child_by_field_name("body")
+            .unwrap()
     }
 
     #[test]
@@ -1522,7 +1584,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) = resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let value_var = r
             .entities
@@ -1543,8 +1612,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (symbols, edges) =
-            resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (symbols, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         assert!(symbols.iter().any(|s| s.name.starts_with("unknown-local")));
         assert!(edges
@@ -1558,7 +1633,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) = resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let helper = r
             .entities
@@ -1574,12 +1656,78 @@ mod tests {
     }
 
     #[test]
+    fn a_free_call_to_a_function_declared_in_another_file_resolves_via_repo_wide_fallback() {
+        // Regression test for the cross-file CALLS gap found via Phase 18.1's
+        // real-world benchmarking: the scope tree only ever covered the
+        // calling file's own entities, so a call to a function declared in
+        // another module fell straight to an `unknown-local` placeholder.
+        use crate::symbols::build_symbol_table;
+
+        let adapter = TypeScriptAdapter;
+        let helper_ast = adapter.parse("function helper(): void {}\n").unwrap();
+        let (helper_entities, helper_edges) = adapter.extract(&helper_ast, "helper.ts");
+        let caller_ast = adapter
+            .parse("function run(): void {\n  helper();\n}\n")
+            .unwrap();
+        let (caller_entities, caller_edges) = adapter.extract(&caller_ast, "run.ts");
+
+        let mut all_entities = helper_entities.clone();
+        all_entities.extend(caller_entities.clone());
+        let mut all_edges = helper_edges;
+        all_edges.extend(caller_edges);
+        let symbol_table = build_symbol_table(&all_entities);
+
+        let caller_module = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Module)
+            .unwrap();
+        let module_symbol = symbol_table.find_by_syntax_id(&caller_module.id).unwrap();
+
+        let (_symbols, edges) = adapter.resolve_file(
+            &caller_ast,
+            "run.ts",
+            &all_entities,
+            &symbol_table,
+            &all_edges,
+            module_symbol,
+            caller_module,
+        );
+
+        let helper = helper_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Function && e.name == "helper")
+            .unwrap();
+        let helper_symbol = symbol_table.find_by_syntax_id(&helper.id).unwrap();
+        let run = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Function && e.name == "run")
+            .unwrap();
+        let run_symbol = symbol_table.find_by_syntax_id(&run.id).unwrap();
+
+        assert!(
+            edges.contains(&Edge::new(
+                run_symbol.id.clone(),
+                helper_symbol.id.clone(),
+                EdgeKind::Calls
+            )),
+            "expected a real CALLS edge to helper's resolved symbol, not an unresolved placeholder: {edges:?}"
+        );
+    }
+
+    #[test]
     fn resolves_a_method_call_by_best_effort_name_match() {
         let source = "class Shape {\n  area(): void {}\n}\n\nfunction run(shape: Shape): void {\n  shape.area();\n}\n";
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) = resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let area = r
             .entities
@@ -1600,7 +1748,14 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (_, edges) = resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         let circle = r
             .entities
@@ -1621,10 +1776,18 @@ mod tests {
         let (tree, r) = setup(source, "run");
         let body = body_of(&tree, source, "run");
 
-        let (symbols, edges) =
-            resolve_body(body, source, &r.fn_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (symbols, edges) = resolve_body(
+            body,
+            source,
+            &r.fn_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
-        assert!(symbols.iter().any(|s| s.name.starts_with("unsupported-form")));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name.starts_with("unsupported-form")));
         assert!(edges
             .iter()
             .any(|e| e.kind == EdgeKind::Calls && e.from == r.fn_symbol.id));
@@ -1751,7 +1914,8 @@ mod tests {
             &mut sites,
         );
 
-        let heritage_edges = resolve_heritage(&sites, &entities, &edges, &symbol_table, &ast.source);
+        let heritage_edges =
+            resolve_heritage(&sites, &entities, &edges, &symbol_table, &ast.source);
 
         let base = entities
             .iter()
@@ -1808,7 +1972,10 @@ mod tests {
         let ast = adapter.parse(source).unwrap();
         let (entities, _edges) = adapter.extract(&ast, "module.ts");
         let symbol_table = crate::symbols::build_symbol_table(&entities);
-        let module_symbol = symbol_table.find_by_syntax_id(&entities[0].id).unwrap().clone();
+        let module_symbol = symbol_table
+            .find_by_syntax_id(&entities[0].id)
+            .unwrap()
+            .clone();
         let mut sites = ResolutionSites::default();
         extract_items(
             ast.tree.root_node(),
@@ -1842,7 +2009,10 @@ mod tests {
         let ast = adapter.parse(source).unwrap();
         let (entities, _edges) = adapter.extract(&ast, "module.ts");
         let symbol_table = crate::symbols::build_symbol_table(&entities);
-        let module_symbol = symbol_table.find_by_syntax_id(&entities[0].id).unwrap().clone();
+        let module_symbol = symbol_table
+            .find_by_syntax_id(&entities[0].id)
+            .unwrap()
+            .clone();
         let mut sites = ResolutionSites::default();
         extract_items(
             ast.tree.root_node(),

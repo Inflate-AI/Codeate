@@ -767,7 +767,20 @@ fn resolve_calls(
                 let resolved = scope_tree
                     .lookup(scope, &name)
                     .and_then(|syntax_id| symbol_table.find_by_syntax_id(syntax_id))
-                    .cloned();
+                    .cloned()
+                    .or_else(|| {
+                        // The scope tree is built from this file's own
+                        // entities only, so a call to a function declared in
+                        // another file never resolves through it -- fall
+                        // back to a repo-wide best-effort name match against
+                        // `symbol_table` (which Phase 9's pipeline builds
+                        // over every file), mirroring the method-call branch
+                        // below, which has always searched repo-wide.
+                        symbol_table
+                            .symbols()
+                            .find(|s| s.kind == SymbolKind::Function && s.name == name)
+                            .cloned()
+                    });
                 let target = resolved.unwrap_or_else(|| {
                     let placeholder = unresolved_symbol("unknown-local", &name);
                     symbols.push(placeholder.clone());
@@ -993,10 +1006,9 @@ fn base_type_name(type_ref: &TypeRef) -> String {
         // look up by -- TypeScript-only shapes (Phase 17.2's canonical-model
         // addition) the Rust adapter never produces itself, so this arm
         // exists only to keep the match exhaustive.
-        TypeRef::Union(members) | TypeRef::Intersection(members) => members
-            .first()
-            .map(base_type_name)
-            .unwrap_or_default(),
+        TypeRef::Union(members) | TypeRef::Intersection(members) => {
+            members.first().map(base_type_name).unwrap_or_default()
+        }
         TypeRef::Unresolved(raw) => raw.clone(),
     }
 }
@@ -2575,7 +2587,7 @@ mod tests {
             let ast = adapter.parse("pub fn helper() {}").unwrap();
             adapter.extract(&ast, "src/helper.rs")
         };
-        let (main_entities, main_edges) = {
+        let (main_entities, _main_edges) = {
             let adapter = RustAdapter;
             let ast = adapter.parse("fn run() { helper() }").unwrap();
             adapter.extract(&ast, "src/main.rs")
@@ -2590,8 +2602,6 @@ mod tests {
         let run_syntax = find(&main_entities, SyntaxKind::Function, "run");
         let helper_syntax = find(&helper_entities, SyntaxKind::Function, "helper");
 
-        let scope_tree = ScopeTree::build(main_module, &main_entities, &main_edges);
-        let run_scope = scope_tree.scope_of(&run_syntax.id).unwrap();
         let run_symbol = symbol_table
             .find_by_syntax_id(&run_syntax.id)
             .unwrap()
@@ -2609,17 +2619,11 @@ mod tests {
             .unwrap()
             .clone();
 
-        // The cross-file call fails to resolve via `run`'s own (single-file)
-        // scope tree, matching `resolve_calls`'s existing scope-only lookup --
-        // so we exercise `DEPENDS_ON` directly against the known-resolved
-        // cross-file CALLS edge, exactly as a real repository-level pass
-        // (Phase 9) would once it merges scope trees across files.
         let call_edge = Edge::new(
             run_symbol.id.clone(),
             helper_symbol.id.clone(),
             EdgeKind::Calls,
         );
-        let _ = (scope_tree, run_scope); // scope-tree lookup is single-file only; see note above.
 
         let owner_file: HashMap<_, _> = [
             (run_symbol.id.clone(), "src/main.rs".to_string()),
@@ -2639,5 +2643,62 @@ mod tests {
             helper_module_symbol.id,
             EdgeKind::DependsOn
         )));
+    }
+
+    #[test]
+    fn a_free_call_to_a_function_declared_in_another_file_resolves_via_repo_wide_fallback() {
+        // Regression test for the cross-file CALLS gap found via Phase 18.1's
+        // real-world benchmarking (rust-lang/cargo): `resolve_calls`'s scope
+        // tree only ever covered the calling file's own entities, so a call
+        // to a function declared elsewhere fell straight to an
+        // `unknown-local` placeholder, never reaching `symbol_table` (which
+        // *is* repo-wide) at all.
+        use crate::symbols::build_symbol_table;
+
+        let (helper_entities, helper_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter.parse("pub fn helper() {}").unwrap();
+            adapter.extract(&ast, "src/helper.rs")
+        };
+        let (main_entities, main_edges) = {
+            let adapter = RustAdapter;
+            let ast = adapter.parse("fn run() { helper() }").unwrap();
+            adapter.extract(&ast, "src/main.rs")
+        };
+
+        let mut all_entities = helper_entities.clone();
+        all_entities.extend(main_entities.clone());
+        let mut all_edges = helper_edges;
+        all_edges.extend(main_edges);
+        let symbol_table = build_symbol_table(&all_entities);
+
+        let main_module = find(&main_entities, SyntaxKind::Module, "src/main.rs");
+        let helper_syntax = find(&helper_entities, SyntaxKind::Function, "helper");
+        let module_symbol = symbol_table.find_by_syntax_id(&main_module.id).unwrap();
+
+        let adapter = RustAdapter;
+        let ast = adapter.parse("fn run() { helper() }").unwrap();
+        let (_symbols, edges) = adapter.resolve_file(
+            &ast,
+            "src/main.rs",
+            &all_entities,
+            &symbol_table,
+            &all_edges,
+            module_symbol,
+            main_module,
+        );
+
+        let helper_symbol = symbol_table.find_by_syntax_id(&helper_syntax.id).unwrap();
+        let run_syntax = find(&main_entities, SyntaxKind::Function, "run");
+        let run_symbol = symbol_table.find_by_syntax_id(&run_syntax.id).unwrap();
+
+        assert!(
+            edges.contains(&Edge::new(
+                run_symbol.id.clone(),
+                helper_symbol.id.clone(),
+                EdgeKind::Calls
+            )),
+            "expected a real CALLS edge to helper's resolved symbol, not an unresolved placeholder: {edges:?}"
+        );
     }
 }

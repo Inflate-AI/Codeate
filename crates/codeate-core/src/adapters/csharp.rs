@@ -130,7 +130,12 @@ impl LanguageAdapter for CSharpAdapter {
             edges.extend(body_edges);
         }
 
-        edges.extend(resolve_structural(&sites, all_entities, symbol_table, &mut symbols));
+        edges.extend(resolve_structural(
+            &sites,
+            all_entities,
+            symbol_table,
+            &mut symbols,
+        ));
 
         let (import_symbols, import_edges) =
             resolve_imports(&sites.imports, &ast.source, module_symbol);
@@ -188,7 +193,9 @@ struct ResolutionSites<'a> {
 /// `modifier` as a direct, unwrapped child.
 fn has_public_modifier(node: Node, src: &str) -> bool {
     let mut cursor = node.walk();
-    let result = node.children(&mut cursor).any(|c| c.kind() == "modifier" && text(c, src) == "public");
+    let result = node
+        .children(&mut cursor)
+        .any(|c| c.kind() == "modifier" && text(c, src) == "public");
     result
 }
 
@@ -208,8 +215,16 @@ fn declare(
     entities: &mut Vec<SyntaxEntity>,
     edges: &mut Vec<Edge>,
 ) {
-    edges.push(Edge::new(parent.id.clone(), child.id.clone(), EdgeKind::Contains));
-    edges.push(Edge::new(parent.id.clone(), child.id.clone(), EdgeKind::Declares));
+    edges.push(Edge::new(
+        parent.id.clone(),
+        child.id.clone(),
+        EdgeKind::Contains,
+    ));
+    edges.push(Edge::new(
+        parent.id.clone(),
+        child.id.clone(),
+        EdgeKind::Declares,
+    ));
     entities.push(child);
 }
 
@@ -221,7 +236,11 @@ fn contain(
     entities: &mut Vec<SyntaxEntity>,
     edges: &mut Vec<Edge>,
 ) {
-    edges.push(Edge::new(parent.id.clone(), child.id.clone(), EdgeKind::Contains));
+    edges.push(Edge::new(
+        parent.id.clone(),
+        child.id.clone(),
+        EdgeKind::Contains,
+    ));
     entities.push(child);
 }
 
@@ -291,7 +310,9 @@ fn looks_like_interface_name(name: &str) -> bool {
 /// kind).
 fn variable_declaration_of<'a>(node: Node<'a>) -> Option<Node<'a>> {
     let mut cursor = node.walk();
-    let result = node.named_children(&mut cursor).find(|c| c.kind() == "variable_declaration");
+    let result = node
+        .named_children(&mut cursor)
+        .find(|c| c.kind() == "variable_declaration");
     result
 }
 
@@ -384,7 +405,15 @@ fn extract_items<'a>(
             // under this adapter's shape -- a documented gap, matching
             // Java's own undeclared `static_initializer` handling.
             "global_statement" => {}
-            _ => extract_member(child, src, &current_parent, &current_scope, entities, edges, sites),
+            _ => extract_member(
+                child,
+                src,
+                &current_parent,
+                &current_scope,
+                entities,
+                edges,
+                sites,
+            ),
         }
     }
 }
@@ -474,7 +503,9 @@ fn extract_member<'a>(
             }
         }
         "class_declaration" => extract_class(node, src, owner, owner_scope, entities, edges, sites),
-        "struct_declaration" => extract_struct(node, src, owner, owner_scope, entities, edges, sites),
+        "struct_declaration" => {
+            extract_struct(node, src, owner, owner_scope, entities, edges, sites)
+        }
         // A `record`/`record class`/`record struct` maps onto the same
         // `Class` entity an ordinary class gets -- the canonical model has
         // no separate record kind, and a record's compiler-synthesized
@@ -482,7 +513,9 @@ fn extract_member<'a>(
         // `ToString`/`Deconstruct`, `with`-expression support) aren't
         // modeled, the same posture Java's adapter takes toward enum
         // constants' auto-generated `values()`/`valueOf()`.
-        "record_declaration" => extract_class(node, src, owner, owner_scope, entities, edges, sites),
+        "record_declaration" => {
+            extract_class(node, src, owner, owner_scope, entities, edges, sites)
+        }
         "interface_declaration" => {
             extract_interface(node, src, owner, owner_scope, entities, edges, sites)
         }
@@ -492,9 +525,14 @@ fn extract_member<'a>(
         // this adapter's shape -- a documented gap, not guessed at (an
         // indexer's `this[...]` binds no name; an operator's name is a
         // symbol, not an identifier).
-        "indexer_declaration" | "event_declaration" | "event_field_declaration"
-        | "delegate_declaration" | "operator_declaration" | "conversion_operator_declaration"
-        | "destructor_declaration" | ";" => {}
+        "indexer_declaration"
+        | "event_declaration"
+        | "event_field_declaration"
+        | "delegate_declaration"
+        | "operator_declaration"
+        | "conversion_operator_declaration"
+        | "destructor_declaration"
+        | ";" => {}
         _ => {}
     }
 }
@@ -528,7 +566,9 @@ fn extract_class<'a>(
             if index == 0 {
                 sites.class_first_bases.push((entity.clone(), type_name));
             } else {
-                sites.implemented_interfaces.push((entity.clone(), type_name));
+                sites
+                    .implemented_interfaces
+                    .push((entity.clone(), type_name));
             }
         }
     }
@@ -660,7 +700,8 @@ fn extract_enum<'a>(
         let Some(const_name) = child.child_by_field_name("name") else {
             continue;
         };
-        let const_entity = SyntaxEntity::new(SyntaxKind::Variable, &enum_scope, text(const_name, src));
+        let const_entity =
+            SyntaxEntity::new(SyntaxKind::Variable, &enum_scope, text(const_name, src));
         contain(&entity, const_entity, entities, edges);
     }
 }
@@ -728,8 +769,12 @@ fn extract_body(
                     }
                 }
             }
-            "class_declaration" | "struct_declaration" | "interface_declaration"
-            | "enum_declaration" | "record_declaration" | "local_function_statement" => {}
+            "class_declaration"
+            | "struct_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "local_function_statement" => {}
             _ => {
                 let entity =
                     SyntaxEntity::new(SyntaxKind::Statement, scope, format!("stmt_{index}"));
@@ -782,16 +827,22 @@ fn resolve_body<'a>(
         "block" => {
             let mut cursor = body.walk();
             for stmt in body.named_children(&mut cursor) {
-                walk_stmt(stmt, &mut |n| names.push(n), &mut |n| calls.push(n), &mut |n| {
-                    news.push(n)
-                });
+                walk_stmt(
+                    stmt,
+                    &mut |n| names.push(n),
+                    &mut |n| calls.push(n),
+                    &mut |n| news.push(n),
+                );
             }
         }
         "arrow_expression_clause" => {
             if let Some(expr) = body.named_child(0) {
-                walk_expr(expr, &mut |n| names.push(n), &mut |n| calls.push(n), &mut |n| {
-                    news.push(n)
-                });
+                walk_expr(
+                    expr,
+                    &mut |n| names.push(n),
+                    &mut |n| calls.push(n),
+                    &mut |n| news.push(n),
+                );
             }
         }
         _ => {}
@@ -811,7 +862,11 @@ fn resolve_body<'a>(
             symbols.push(placeholder.clone());
             placeholder
         });
-        edges.push(Edge::new(member_symbol.id.clone(), target.id.clone(), EdgeKind::References));
+        edges.push(Edge::new(
+            member_symbol.id.clone(),
+            target.id.clone(),
+            EdgeKind::References,
+        ));
     }
 
     for call_node in &calls {
@@ -856,13 +911,29 @@ fn resolve_body<'a>(
                 .lookup(scope, ident)
                 .and_then(|id| symbol_table.find_by_syntax_id(id))
                 .cloned()
+                .or_else(|| {
+                    // The scope tree only covers this file's own entities,
+                    // so a call to a method declared in another file never
+                    // resolves through it -- fall back to a repo-wide
+                    // best-effort name match against `symbol_table`,
+                    // mirroring the receiver-qualified branch above, which
+                    // has always searched repo-wide.
+                    symbol_table
+                        .symbols()
+                        .find(|s| s.kind == SymbolKind::Method && s.name == ident)
+                        .cloned()
+                })
                 .unwrap_or_else(|| {
                     let placeholder = unresolved_symbol("unknown-local", ident);
                     symbols.push(placeholder.clone());
                     placeholder
                 })
         };
-        edges.push(Edge::new(member_symbol.id.clone(), target.id.clone(), EdgeKind::Calls));
+        edges.push(Edge::new(
+            member_symbol.id.clone(),
+            target.id.clone(),
+            EdgeKind::Calls,
+        ));
     }
 
     for new_node in &news {
@@ -888,7 +959,11 @@ fn resolve_body<'a>(
             type_args: Vec::new(),
         });
         symbols.push(type_symbol.clone());
-        edges.push(Edge::new(member_symbol.id.clone(), type_symbol.id, EdgeKind::Instantiates));
+        edges.push(Edge::new(
+            member_symbol.id.clone(),
+            type_symbol.id,
+            EdgeKind::Instantiates,
+        ));
     }
 
     (symbols, edges)
@@ -1105,8 +1180,10 @@ fn find_type_entity_kind(all_entities: &[SyntaxEntity], name: &str) -> Option<Sy
     all_entities
         .iter()
         .find(|e| {
-            matches!(e.kind, SyntaxKind::Class | SyntaxKind::Struct | SyntaxKind::Interface)
-                && e.name == name
+            matches!(
+                e.kind,
+                SyntaxKind::Class | SyntaxKind::Struct | SyntaxKind::Interface
+            ) && e.name == name
         })
         .map(|e| e.kind)
 }
@@ -1143,14 +1220,22 @@ fn resolve_structural(
         };
         match find_type_entity_kind(all_entities, base_name) {
             Some(SyntaxKind::Interface) => {
-                let target =
-                    find_type_symbol(all_entities, symbol_table, &[SyntaxKind::Interface], base_name)
-                        .unwrap_or_else(|| {
-                            let placeholder = unresolved_symbol("external-interface", base_name);
-                            symbols.push(placeholder.clone());
-                            placeholder
-                        });
-                edges.push(Edge::new(owner_symbol.id.clone(), target.id, EdgeKind::Implements));
+                let target = find_type_symbol(
+                    all_entities,
+                    symbol_table,
+                    &[SyntaxKind::Interface],
+                    base_name,
+                )
+                .unwrap_or_else(|| {
+                    let placeholder = unresolved_symbol("external-interface", base_name);
+                    symbols.push(placeholder.clone());
+                    placeholder
+                });
+                edges.push(Edge::new(
+                    owner_symbol.id.clone(),
+                    target.id,
+                    EdgeKind::Implements,
+                ));
             }
             Some(SyntaxKind::Class) | Some(SyntaxKind::Struct) => {
                 let target = find_type_symbol(
@@ -1164,17 +1249,29 @@ fn resolve_structural(
                     symbols.push(placeholder.clone());
                     placeholder
                 });
-                edges.push(Edge::new(owner_symbol.id.clone(), target.id, EdgeKind::Extends));
+                edges.push(Edge::new(
+                    owner_symbol.id.clone(),
+                    target.id,
+                    EdgeKind::Extends,
+                ));
             }
             _ => {
                 if looks_like_interface_name(base_name) {
                     let placeholder = unresolved_symbol("external-interface", base_name);
                     symbols.push(placeholder.clone());
-                    edges.push(Edge::new(owner_symbol.id.clone(), placeholder.id, EdgeKind::Implements));
+                    edges.push(Edge::new(
+                        owner_symbol.id.clone(),
+                        placeholder.id,
+                        EdgeKind::Implements,
+                    ));
                 } else {
                     let placeholder = unresolved_symbol("external-class", base_name);
                     symbols.push(placeholder.clone());
-                    edges.push(Edge::new(owner_symbol.id.clone(), placeholder.id, EdgeKind::Extends));
+                    edges.push(Edge::new(
+                        owner_symbol.id.clone(),
+                        placeholder.id,
+                        EdgeKind::Extends,
+                    ));
                 }
             }
         }
@@ -1184,27 +1281,44 @@ fn resolve_structural(
         let Some(owner_symbol) = symbol_table.find_by_syntax_id(&entity.id) else {
             continue;
         };
-        let target =
-            find_type_symbol(all_entities, symbol_table, &[SyntaxKind::Interface], interface_name)
-                .unwrap_or_else(|| {
-                    let placeholder = unresolved_symbol("external-interface", interface_name);
-                    symbols.push(placeholder.clone());
-                    placeholder
-                });
-        edges.push(Edge::new(owner_symbol.id.clone(), target.id, EdgeKind::Implements));
+        let target = find_type_symbol(
+            all_entities,
+            symbol_table,
+            &[SyntaxKind::Interface],
+            interface_name,
+        )
+        .unwrap_or_else(|| {
+            let placeholder = unresolved_symbol("external-interface", interface_name);
+            symbols.push(placeholder.clone());
+            placeholder
+        });
+        edges.push(Edge::new(
+            owner_symbol.id.clone(),
+            target.id,
+            EdgeKind::Implements,
+        ));
     }
 
     for (iface_entity, super_name) in &sites.extended_interfaces {
         let Some(iface_symbol) = symbol_table.find_by_syntax_id(&iface_entity.id) else {
             continue;
         };
-        let target = find_type_symbol(all_entities, symbol_table, &[SyntaxKind::Interface], super_name)
-            .unwrap_or_else(|| {
-                let placeholder = unresolved_symbol("external-interface", super_name);
-                symbols.push(placeholder.clone());
-                placeholder
-            });
-        edges.push(Edge::new(iface_symbol.id.clone(), target.id, EdgeKind::Extends));
+        let target = find_type_symbol(
+            all_entities,
+            symbol_table,
+            &[SyntaxKind::Interface],
+            super_name,
+        )
+        .unwrap_or_else(|| {
+            let placeholder = unresolved_symbol("external-interface", super_name);
+            symbols.push(placeholder.clone());
+            placeholder
+        });
+        edges.push(Edge::new(
+            iface_symbol.id.clone(),
+            target.id,
+            EdgeKind::Extends,
+        ));
     }
 
     edges
@@ -1241,7 +1355,11 @@ fn resolve_imports(
         }
         let placeholder = unresolved_symbol("external-namespace", path);
         symbols.push(placeholder.clone());
-        edges.push(Edge::new(module_symbol.id.clone(), placeholder.id, EdgeKind::Imports));
+        edges.push(Edge::new(
+            module_symbol.id.clone(),
+            placeholder.id,
+            EdgeKind::Imports,
+        ));
     }
 
     (symbols, edges)
@@ -1260,8 +1378,12 @@ fn resolve_exports(
     module_symbol: &SymbolEntity,
     symbol_table: &SymbolTable,
 ) -> Vec<Edge> {
-    const EXPORTABLE_KINDS: [SyntaxKind; 4] =
-        [SyntaxKind::Class, SyntaxKind::Struct, SyntaxKind::Interface, SyntaxKind::Enum];
+    const EXPORTABLE_KINDS: [SyntaxKind; 4] = [
+        SyntaxKind::Class,
+        SyntaxKind::Struct,
+        SyntaxKind::Interface,
+        SyntaxKind::Enum,
+    ];
 
     let mut edges = Vec::new();
     let module_id = &file_entities[0].id;
@@ -1276,7 +1398,11 @@ fn resolve_exports(
             continue;
         }
         if let Some(symbol) = symbol_table.find_by_syntax_id(&entity.id) {
-            edges.push(Edge::new(module_symbol.id.clone(), symbol.id.clone(), EdgeKind::Exports));
+            edges.push(Edge::new(
+                module_symbol.id.clone(),
+                symbol.id.clone(),
+                EdgeKind::Exports,
+            ));
         }
     }
     edges
@@ -1290,7 +1416,9 @@ fn resolve_exports(
 fn find_type_parameter_list(node: Node) -> Option<Node> {
     node.child_by_field_name("type_parameters").or_else(|| {
         let mut cursor = node.walk();
-        let result = node.children(&mut cursor).find(|c| c.kind() == "type_parameter_list");
+        let result = node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "type_parameter_list");
         result
     })
 }
@@ -1393,7 +1521,11 @@ fn extract_generic_params(
         };
         let name = text(name_node, src);
         let symbol = SymbolEntity::new(SymbolKind::Generic, owner_symbol.id.as_str(), name);
-        edges.push(Edge::new(owner_symbol.id.clone(), symbol.id.clone(), EdgeKind::Declares));
+        edges.push(Edge::new(
+            owner_symbol.id.clone(),
+            symbol.id.clone(),
+            EdgeKind::Declares,
+        ));
         symbols.push(symbol);
     }
 
@@ -1412,7 +1544,9 @@ mod tests {
 
     fn parse_source(source: &str) -> Tree {
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_c_sharp::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_c_sharp::LANGUAGE.into())
+            .unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -1452,13 +1586,21 @@ mod tests {
             .iter()
             .find(|e| e.kind == SyntaxKind::Class && e.name == "Calculator")
             .expect("Class entity");
-        assert!(edges.contains(&Edge::new(module.id.clone(), class.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            module.id.clone(),
+            class.id.clone(),
+            EdgeKind::Declares
+        )));
 
         let method = entities
             .iter()
             .find(|e| e.kind == SyntaxKind::Method && e.name == "Add")
             .expect("Method entity");
-        assert!(edges.contains(&Edge::new(class.id.clone(), method.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            class.id.clone(),
+            method.id.clone(),
+            EdgeKind::Declares
+        )));
 
         let param_names: Vec<&str> = entities
             .iter()
@@ -1471,12 +1613,19 @@ mod tests {
     #[test]
     fn extracts_a_constructor_as_a_method() {
         let (entities, edges) = extract("class Point {\n  Point(int x) {}\n}\n");
-        let class = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Point").unwrap();
+        let class = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Point")
+            .unwrap();
         let ctor = entities
             .iter()
             .find(|e| e.kind == SyntaxKind::Method && e.name == "Point")
             .expect("constructor modeled as a Method");
-        assert!(edges.contains(&Edge::new(class.id.clone(), ctor.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            class.id.clone(),
+            ctor.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -1500,7 +1649,11 @@ mod tests {
             .iter()
             .find(|e| e.kind == SyntaxKind::Struct && e.name == "Point")
             .expect("Struct entity");
-        assert!(edges.contains(&Edge::new(module.id.clone(), point.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            module.id.clone(),
+            point.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -1515,56 +1668,102 @@ mod tests {
     #[test]
     fn extracts_an_enum_with_its_constants() {
         let (entities, edges) = extract("enum Color {\n  Red, Green, Blue\n}\n");
-        let color = entities.iter().find(|e| e.kind == SyntaxKind::Enum && e.name == "Color").unwrap();
+        let color = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Enum && e.name == "Color")
+            .unwrap();
         let red = entities
             .iter()
             .find(|e| e.kind == SyntaxKind::Variable && e.name == "Red")
             .expect("Red constant entity");
-        assert!(edges.contains(&Edge::new(color.id.clone(), red.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(
+            color.id.clone(),
+            red.id.clone(),
+            EdgeKind::Contains
+        )));
     }
 
     #[test]
     fn extracts_a_nested_class_scoped_under_its_enclosing_class() {
         let source = "class Outer {\n  class Inner {\n    void Run() {}\n  }\n}\n";
         let (entities, edges) = extract(source);
-        let outer = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Outer").unwrap();
-        let inner = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Inner").unwrap();
-        assert!(edges.contains(&Edge::new(outer.id.clone(), inner.id.clone(), EdgeKind::Declares)));
+        let outer = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Outer")
+            .unwrap();
+        let inner = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Inner")
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            outer.id.clone(),
+            inner.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
     fn extracts_a_field_declaration_as_a_variable() {
         let (entities, edges) = extract("class Box {\n  private int size;\n}\n");
-        let class = entities.iter().find(|e| e.kind == SyntaxKind::Class).unwrap();
+        let class = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class)
+            .unwrap();
         let field = entities
             .iter()
             .find(|e| e.kind == SyntaxKind::Variable && e.name == "size")
             .expect("field entity");
-        assert!(edges.contains(&Edge::new(class.id.clone(), field.id.clone(), EdgeKind::Contains)));
-        assert!(!edges.contains(&Edge::new(class.id.clone(), field.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            class.id.clone(),
+            field.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(!edges.contains(&Edge::new(
+            class.id.clone(),
+            field.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
     fn extracts_a_property_declaration_as_a_field() {
         let (entities, edges) = extract("class Box {\n  public int Size { get; set; }\n}\n");
-        let class = entities.iter().find(|e| e.kind == SyntaxKind::Class).unwrap();
+        let class = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class)
+            .unwrap();
         let property = entities
             .iter()
             .find(|e| e.kind == SyntaxKind::Variable && e.name == "Size")
             .expect("property entity modeled as a Field");
-        assert!(edges.contains(&Edge::new(class.id.clone(), property.id.clone(), EdgeKind::Contains)));
+        assert!(edges.contains(&Edge::new(
+            class.id.clone(),
+            property.id.clone(),
+            EdgeKind::Contains
+        )));
     }
 
     #[test]
     fn extracts_a_local_variable_declaration_in_a_method_body() {
         let (entities, edges) = extract("class Run {\n  void Go() {\n    int total = 1;\n  }\n}\n");
-        let method = entities.iter().find(|e| e.kind == SyntaxKind::Method && e.name == "Go").unwrap();
+        let method = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Method && e.name == "Go")
+            .unwrap();
         let variable = entities
             .iter()
             .find(|e| e.kind == SyntaxKind::Variable && e.name == "total")
             .expect("Variable entity");
-        assert!(edges.contains(&Edge::new(method.id.clone(), variable.id.clone(), EdgeKind::Contains)));
-        assert!(!edges.contains(&Edge::new(method.id.clone(), variable.id.clone(), EdgeKind::Declares)));
+        assert!(edges.contains(&Edge::new(
+            method.id.clone(),
+            variable.id.clone(),
+            EdgeKind::Contains
+        )));
+        assert!(!edges.contains(&Edge::new(
+            method.id.clone(),
+            variable.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -1600,8 +1799,15 @@ mod tests {
             ns_module.id.clone(),
             EdgeKind::Declares
         )));
-        let circle = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Circle").unwrap();
-        assert!(edges.contains(&Edge::new(ns_module.id.clone(), circle.id.clone(), EdgeKind::Declares)));
+        let circle = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Circle")
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            ns_module.id.clone(),
+            circle.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     #[test]
@@ -1612,10 +1818,24 @@ mod tests {
             .iter()
             .find(|e| e.kind == SyntaxKind::Module && e.name == "Shapes")
             .expect("file-scoped namespace entity");
-        let circle = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Circle").unwrap();
-        let square = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Square").unwrap();
-        assert!(edges.contains(&Edge::new(ns_module.id.clone(), circle.id.clone(), EdgeKind::Declares)));
-        assert!(edges.contains(&Edge::new(ns_module.id.clone(), square.id.clone(), EdgeKind::Declares)));
+        let circle = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Circle")
+            .unwrap();
+        let square = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Square")
+            .unwrap();
+        assert!(edges.contains(&Edge::new(
+            ns_module.id.clone(),
+            circle.id.clone(),
+            EdgeKind::Declares
+        )));
+        assert!(edges.contains(&Edge::new(
+            ns_module.id.clone(),
+            square.id.clone(),
+            EdgeKind::Declares
+        )));
     }
 
     // -- type extraction (not yet wired into extract/resolve_file) --
@@ -1625,7 +1845,9 @@ mod tests {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "method_declaration"
-                    && child.child_by_field_name("name").is_some_and(|n| text(n, src) == name)
+                    && child
+                        .child_by_field_name("name")
+                        .is_some_and(|n| text(n, src) == name)
                 {
                     return Some(child);
                 }
@@ -1642,18 +1864,28 @@ mod tests {
     fn extracts_a_primitive_return_type() {
         let full = "class C {\n  int F() { return 0; }\n}\n";
         let tree = parse_source(full);
-        let node = method_named(&tree, full, "F").child_by_field_name("returns").unwrap();
-        assert_eq!(extract_type(node, full), TypeRef::Primitive("int".to_string()));
+        let node = method_named(&tree, full, "F")
+            .child_by_field_name("returns")
+            .unwrap();
+        assert_eq!(
+            extract_type(node, full),
+            TypeRef::Primitive("int".to_string())
+        );
     }
 
     #[test]
     fn extracts_a_user_defined_named_type() {
         let full = "class C {\n  Circle F() { return null; }\n}\n";
         let tree = parse_source(full);
-        let node = method_named(&tree, full, "F").child_by_field_name("returns").unwrap();
+        let node = method_named(&tree, full, "F")
+            .child_by_field_name("returns")
+            .unwrap();
         assert_eq!(
             extract_type(node, full),
-            TypeRef::Named { name: "Circle".to_string(), type_args: Vec::new() }
+            TypeRef::Named {
+                name: "Circle".to_string(),
+                type_args: Vec::new()
+            }
         );
     }
 
@@ -1661,7 +1893,9 @@ mod tests {
     fn extracts_a_generic_named_type_with_its_type_argument() {
         let full = "class C {\n  List<string> F() { return null; }\n}\n";
         let tree = parse_source(full);
-        let node = method_named(&tree, full, "F").child_by_field_name("returns").unwrap();
+        let node = method_named(&tree, full, "F")
+            .child_by_field_name("returns")
+            .unwrap();
         assert_eq!(
             extract_type(node, full),
             TypeRef::Named {
@@ -1675,8 +1909,13 @@ mod tests {
     fn extracts_a_nullable_type_by_unwrapping_to_its_inner_type() {
         let full = "class C {\n  string? F() { return null; }\n}\n";
         let tree = parse_source(full);
-        let node = method_named(&tree, full, "F").child_by_field_name("returns").unwrap();
-        assert_eq!(extract_type(node, full), TypeRef::Primitive("string".to_string()));
+        let node = method_named(&tree, full, "F")
+            .child_by_field_name("returns")
+            .unwrap();
+        assert_eq!(
+            extract_type(node, full),
+            TypeRef::Primitive("string".to_string())
+        );
     }
 
     // -- symbol/reference/call/instantiate/structural resolution --
@@ -1700,14 +1939,30 @@ mod tests {
             .unwrap_or_else(|| panic!("no Method entity named {member_name}"))
             .clone();
         let scope_tree = ScopeTree::build(&module, &entities, &edges);
-        let scope = scope_tree.scope_of(&member_entity.id).expect("method opens a scope");
+        let scope = scope_tree
+            .scope_of(&member_entity.id)
+            .expect("method opens a scope");
         let symbol_table = crate::symbols::build_symbol_table(&entities);
-        let member_symbol = symbol_table.find_by_syntax_id(&member_entity.id).expect("method symbol").clone();
-        (ast.tree, Resolved { entities, scope_tree, scope, symbol_table, member_symbol })
+        let member_symbol = symbol_table
+            .find_by_syntax_id(&member_entity.id)
+            .expect("method symbol")
+            .clone();
+        (
+            ast.tree,
+            Resolved {
+                entities,
+                scope_tree,
+                scope,
+                symbol_table,
+                member_symbol,
+            },
+        )
     }
 
     fn body_of<'a>(tree: &'a Tree, src: &'a str, name: &str) -> Node<'a> {
-        method_named(tree, src, name).child_by_field_name("body").unwrap()
+        method_named(tree, src, name)
+            .child_by_field_name("body")
+            .unwrap()
     }
 
     #[test]
@@ -1716,10 +1971,20 @@ mod tests {
         let (tree, r) = setup(source, "Run");
         let body = body_of(&tree, source, "Run");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.member_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.member_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
-        let value_var = r.entities.iter().find(|e| e.kind == SyntaxKind::Variable).unwrap();
+        let value_var = r
+            .entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Variable)
+            .unwrap();
         let value_symbol = r.symbol_table.find_by_syntax_id(&value_var.id).unwrap();
         assert!(edges.contains(&Edge::new(
             r.member_symbol.id.clone(),
@@ -1734,8 +1999,14 @@ mod tests {
         let (tree, r) = setup(source, "Run");
         let body = body_of(&tree, source, "Run");
 
-        let (symbols, _edges) =
-            resolve_body(body, source, &r.member_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (symbols, _edges) = resolve_body(
+            body,
+            source,
+            &r.member_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         assert!(symbols.iter().any(|s| s.name.starts_with("unknown-local")));
     }
@@ -1746,10 +2017,20 @@ mod tests {
         let (tree, r) = setup(source, "Run");
         let body = body_of(&tree, source, "Run");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.member_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.member_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
-        let helper = r.entities.iter().find(|e| e.kind == SyntaxKind::Method && e.name == "Helper").unwrap();
+        let helper = r
+            .entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Method && e.name == "Helper")
+            .unwrap();
         let helper_symbol = r.symbol_table.find_by_syntax_id(&helper.id).unwrap();
         assert!(edges.contains(&Edge::new(
             r.member_symbol.id.clone(),
@@ -1759,16 +2040,88 @@ mod tests {
     }
 
     #[test]
+    fn a_free_call_to_a_method_declared_in_another_file_resolves_via_repo_wide_fallback() {
+        // Regression test for the cross-file CALLS gap found via Phase 18.1's
+        // real-world benchmarking: the scope tree only ever covered the
+        // calling file's own entities, so a bare (no-receiver) call to a
+        // method declared in another file fell straight to an
+        // `unknown-local` placeholder.
+        use crate::symbols::build_symbol_table;
+
+        let adapter = CSharpAdapter;
+        let helper_ast = adapter
+            .parse("class Helper {\n  void Helper_() {}\n}\n")
+            .unwrap();
+        let (helper_entities, helper_edges) = adapter.extract(&helper_ast, "Helper.cs");
+        let caller_ast = adapter
+            .parse("class Run {\n  void Go() {\n    Helper_();\n  }\n}\n")
+            .unwrap();
+        let (caller_entities, caller_edges) = adapter.extract(&caller_ast, "Run.cs");
+
+        let mut all_entities = helper_entities.clone();
+        all_entities.extend(caller_entities.clone());
+        let mut all_edges = helper_edges;
+        all_edges.extend(caller_edges);
+        let symbol_table = build_symbol_table(&all_entities);
+
+        let caller_module = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Module)
+            .unwrap();
+        let module_symbol = symbol_table.find_by_syntax_id(&caller_module.id).unwrap();
+
+        let (_symbols, edges) = adapter.resolve_file(
+            &caller_ast,
+            "Run.cs",
+            &all_entities,
+            &symbol_table,
+            &all_edges,
+            module_symbol,
+            caller_module,
+        );
+
+        let helper = helper_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Method && e.name == "Helper_")
+            .unwrap();
+        let helper_symbol = symbol_table.find_by_syntax_id(&helper.id).unwrap();
+        let go = caller_entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Method && e.name == "Go")
+            .unwrap();
+        let go_symbol = symbol_table.find_by_syntax_id(&go.id).unwrap();
+
+        assert!(
+            edges.contains(&Edge::new(
+                go_symbol.id.clone(),
+                helper_symbol.id.clone(),
+                EdgeKind::Calls
+            )),
+            "expected a real CALLS edge to helper's resolved symbol, not an unresolved placeholder: {edges:?}"
+        );
+    }
+
+    #[test]
     fn resolves_a_receiver_qualified_call_by_best_effort_name_match() {
         let source =
             "class Shape {\n  double Area() { return 0; }\n}\nclass Run {\n  void Go(Shape shape) {\n    shape.Area();\n  }\n}\n";
         let (tree, r) = setup(source, "Go");
         let body = body_of(&tree, source, "Go");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.member_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.member_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
-        let area = r.entities.iter().find(|e| e.kind == SyntaxKind::Method && e.name == "Area").unwrap();
+        let area = r
+            .entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Method && e.name == "Area")
+            .unwrap();
         let area_symbol = r.symbol_table.find_by_syntax_id(&area.id).unwrap();
         assert!(edges.contains(&Edge::new(
             r.member_symbol.id.clone(),
@@ -1779,14 +2132,25 @@ mod tests {
 
     #[test]
     fn resolves_an_object_creation_instantiation_for_an_in_scope_type() {
-        let source = "class Circle {}\nclass Run {\n  void Go() {\n    Circle c = new Circle();\n  }\n}\n";
+        let source =
+            "class Circle {}\nclass Run {\n  void Go() {\n    Circle c = new Circle();\n  }\n}\n";
         let (tree, r) = setup(source, "Go");
         let body = body_of(&tree, source, "Go");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.member_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.member_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
-        let circle = r.entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Circle").unwrap();
+        let circle = r
+            .entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Circle")
+            .unwrap();
         let circle_symbol = r.symbol_table.find_by_syntax_id(&circle.id).unwrap();
         assert!(edges.contains(&Edge::new(
             r.member_symbol.id.clone(),
@@ -1801,11 +2165,19 @@ mod tests {
         let (tree, r) = setup(source, "Go");
         let body = body_of(&tree, source, "Go");
 
-        let (symbols, edges) =
-            resolve_body(body, source, &r.member_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (symbols, edges) = resolve_body(
+            body,
+            source,
+            &r.member_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
         assert!(symbols.iter().any(|s| s.name == "object"));
-        assert!(edges.iter().any(|e| e.kind == EdgeKind::Instantiates && e.from == r.member_symbol.id));
+        assert!(edges
+            .iter()
+            .any(|e| e.kind == EdgeKind::Instantiates && e.from == r.member_symbol.id));
     }
 
     #[test]
@@ -1815,10 +2187,20 @@ mod tests {
         let body = body_of(&tree, source, "Run");
         assert_eq!(body.kind(), "arrow_expression_clause");
 
-        let (_, edges) =
-            resolve_body(body, source, &r.member_symbol, &r.scope_tree, r.scope, &r.symbol_table);
+        let (_, edges) = resolve_body(
+            body,
+            source,
+            &r.member_symbol,
+            &r.scope_tree,
+            r.scope,
+            &r.symbol_table,
+        );
 
-        let helper = r.entities.iter().find(|e| e.kind == SyntaxKind::Method && e.name == "Helper").unwrap();
+        let helper = r
+            .entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Method && e.name == "Helper")
+            .unwrap();
         let helper_symbol = r.symbol_table.find_by_syntax_id(&helper.id).unwrap();
         assert!(edges.contains(&Edge::new(
             r.member_symbol.id.clone(),
@@ -1827,7 +2209,9 @@ mod tests {
         )));
     }
 
-    fn extract_with_sites(source: &str) -> (Vec<SyntaxEntity>, SymbolTable, ResolutionSites<'static>) {
+    fn extract_with_sites(
+        source: &str,
+    ) -> (Vec<SyntaxEntity>, SymbolTable, ResolutionSites<'static>) {
         // Leaks the parsed tree so `ResolutionSites`' borrowed nodes can
         // outlive this helper -- test-only, mirroring the shape Java's own
         // structural-resolution tests use via a `Tree` kept alive in the
@@ -1858,11 +2242,21 @@ mod tests {
         let mut symbols = Vec::new();
         let edges = resolve_structural(&sites, &entities, &symbol_table, &mut symbols);
 
-        let circle = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Circle").unwrap();
-        let shape = entities.iter().find(|e| e.kind == SyntaxKind::Interface && e.name == "IShape").unwrap();
+        let circle = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Circle")
+            .unwrap();
+        let shape = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Interface && e.name == "IShape")
+            .unwrap();
         let circle_symbol = symbol_table.find_by_syntax_id(&circle.id).unwrap();
         let shape_symbol = symbol_table.find_by_syntax_id(&shape.id).unwrap();
-        assert!(edges.contains(&Edge::new(circle_symbol.id.clone(), shape_symbol.id.clone(), EdgeKind::Implements)));
+        assert!(edges.contains(&Edge::new(
+            circle_symbol.id.clone(),
+            shape_symbol.id.clone(),
+            EdgeKind::Implements
+        )));
     }
 
     #[test]
@@ -1872,11 +2266,21 @@ mod tests {
         let mut symbols = Vec::new();
         let edges = resolve_structural(&sites, &entities, &symbol_table, &mut symbols);
 
-        let dog = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Dog").unwrap();
-        let animal = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Animal").unwrap();
+        let dog = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Dog")
+            .unwrap();
+        let animal = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Animal")
+            .unwrap();
         let dog_symbol = symbol_table.find_by_syntax_id(&dog.id).unwrap();
         let animal_symbol = symbol_table.find_by_syntax_id(&animal.id).unwrap();
-        assert!(edges.contains(&Edge::new(dog_symbol.id.clone(), animal_symbol.id.clone(), EdgeKind::Extends)));
+        assert!(edges.contains(&Edge::new(
+            dog_symbol.id.clone(),
+            animal_symbol.id.clone(),
+            EdgeKind::Extends
+        )));
     }
 
     #[test]
@@ -1887,14 +2291,31 @@ mod tests {
         let mut symbols = Vec::new();
         let edges = resolve_structural(&sites, &entities, &symbol_table, &mut symbols);
 
-        let dog = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Dog").unwrap();
-        let animal = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Animal").unwrap();
-        let shape = entities.iter().find(|e| e.kind == SyntaxKind::Interface && e.name == "IShape").unwrap();
+        let dog = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Dog")
+            .unwrap();
+        let animal = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Animal")
+            .unwrap();
+        let shape = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Interface && e.name == "IShape")
+            .unwrap();
         let dog_symbol = symbol_table.find_by_syntax_id(&dog.id).unwrap();
         let animal_symbol = symbol_table.find_by_syntax_id(&animal.id).unwrap();
         let shape_symbol = symbol_table.find_by_syntax_id(&shape.id).unwrap();
-        assert!(edges.contains(&Edge::new(dog_symbol.id.clone(), animal_symbol.id.clone(), EdgeKind::Extends)));
-        assert!(edges.contains(&Edge::new(dog_symbol.id.clone(), shape_symbol.id.clone(), EdgeKind::Implements)));
+        assert!(edges.contains(&Edge::new(
+            dog_symbol.id.clone(),
+            animal_symbol.id.clone(),
+            EdgeKind::Extends
+        )));
+        assert!(edges.contains(&Edge::new(
+            dog_symbol.id.clone(),
+            shape_symbol.id.clone(),
+            EdgeKind::Implements
+        )));
     }
 
     #[test]
@@ -1904,11 +2325,21 @@ mod tests {
         let mut symbols = Vec::new();
         let edges = resolve_structural(&sites, &entities, &symbol_table, &mut symbols);
 
-        let circle = entities.iter().find(|e| e.kind == SyntaxKind::Struct && e.name == "Circle").unwrap();
-        let shape = entities.iter().find(|e| e.kind == SyntaxKind::Interface && e.name == "IShape").unwrap();
+        let circle = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Struct && e.name == "Circle")
+            .unwrap();
+        let shape = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Interface && e.name == "IShape")
+            .unwrap();
         let circle_symbol = symbol_table.find_by_syntax_id(&circle.id).unwrap();
         let shape_symbol = symbol_table.find_by_syntax_id(&shape.id).unwrap();
-        assert!(edges.contains(&Edge::new(circle_symbol.id.clone(), shape_symbol.id.clone(), EdgeKind::Implements)));
+        assert!(edges.contains(&Edge::new(
+            circle_symbol.id.clone(),
+            shape_symbol.id.clone(),
+            EdgeKind::Implements
+        )));
         assert!(!edges.iter().any(|e| e.kind == EdgeKind::Extends));
     }
 
@@ -1919,11 +2350,21 @@ mod tests {
         let mut symbols = Vec::new();
         let edges = resolve_structural(&sites, &entities, &symbol_table, &mut symbols);
 
-        let derived = entities.iter().find(|e| e.kind == SyntaxKind::Interface && e.name == "IDerived").unwrap();
-        let base = entities.iter().find(|e| e.kind == SyntaxKind::Interface && e.name == "IBase").unwrap();
+        let derived = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Interface && e.name == "IDerived")
+            .unwrap();
+        let base = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Interface && e.name == "IBase")
+            .unwrap();
         let derived_symbol = symbol_table.find_by_syntax_id(&derived.id).unwrap();
         let base_symbol = symbol_table.find_by_syntax_id(&base.id).unwrap();
-        assert!(edges.contains(&Edge::new(derived_symbol.id.clone(), base_symbol.id.clone(), EdgeKind::Extends)));
+        assert!(edges.contains(&Edge::new(
+            derived_symbol.id.clone(),
+            base_symbol.id.clone(),
+            EdgeKind::Extends
+        )));
     }
 
     #[test]
@@ -1933,7 +2374,9 @@ mod tests {
         let mut symbols = Vec::new();
         let edges = resolve_structural(&sites, &entities, &symbol_table, &mut symbols);
 
-        assert!(symbols.iter().any(|s| s.name.starts_with("external-interface:IDisposable")));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name.starts_with("external-interface:IDisposable")));
         assert!(edges.iter().all(|e| e.kind == EdgeKind::Implements));
     }
 
@@ -1944,7 +2387,9 @@ mod tests {
         let mut symbols = Vec::new();
         let edges = resolve_structural(&sites, &entities, &symbol_table, &mut symbols);
 
-        assert!(symbols.iter().any(|s| s.name.starts_with("external-class:Exception")));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name.starts_with("external-class:Exception")));
         assert!(edges.iter().all(|e| e.kind == EdgeKind::Extends));
     }
 
@@ -1969,9 +2414,16 @@ mod tests {
         let (symbols, edges) = resolve_imports(&sites.imports, &ast.source, &module_symbol);
 
         assert_eq!(symbols.len(), 2);
-        assert!(symbols.iter().any(|s| s.name == "external-namespace:System"));
-        assert!(symbols.iter().any(|s| s.name == "external-namespace:System.Collections.Generic"));
-        assert_eq!(edges.iter().filter(|e| e.kind == EdgeKind::Imports).count(), 2);
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "external-namespace:System"));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "external-namespace:System.Collections.Generic"));
+        assert_eq!(
+            edges.iter().filter(|e| e.kind == EdgeKind::Imports).count(),
+            2
+        );
     }
 
     #[test]
@@ -1981,7 +2433,10 @@ mod tests {
         let ast = adapter.parse(source).unwrap();
         let (entities, edges) = adapter.extract(&ast, "Module.cs");
         let symbol_table = crate::symbols::build_symbol_table(&entities);
-        let module_symbol = symbol_table.find_by_syntax_id(&entities[0].id).unwrap().clone();
+        let module_symbol = symbol_table
+            .find_by_syntax_id(&entities[0].id)
+            .unwrap()
+            .clone();
 
         let mut sites = ResolutionSites::default();
         extract_items(
@@ -1994,12 +2449,24 @@ mod tests {
             &mut sites,
         );
 
-        let export_edges =
-            resolve_exports(&entities, &edges, &sites.public_types, &module_symbol, &symbol_table);
+        let export_edges = resolve_exports(
+            &entities,
+            &edges,
+            &sites.public_types,
+            &module_symbol,
+            &symbol_table,
+        );
 
-        let public = entities.iter().find(|e| e.kind == SyntaxKind::Class && e.name == "Public").unwrap();
+        let public = entities
+            .iter()
+            .find(|e| e.kind == SyntaxKind::Class && e.name == "Public")
+            .unwrap();
         let public_symbol = symbol_table.find_by_syntax_id(&public.id).unwrap();
         assert_eq!(export_edges.len(), 1);
-        assert!(export_edges.contains(&Edge::new(module_symbol.id.clone(), public_symbol.id.clone(), EdgeKind::Exports)));
+        assert!(export_edges.contains(&Edge::new(
+            module_symbol.id.clone(),
+            public_symbol.id.clone(),
+            EdgeKind::Exports
+        )));
     }
 }

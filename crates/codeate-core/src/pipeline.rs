@@ -168,6 +168,20 @@ fn run_pipeline(
     all_symbols.extend(carry_in.resolution_symbols);
     all_edges.extend(carry_in.resolution_edges);
 
+    // `carry_in.resolution_symbols` and the fresh `symbol_table` above both
+    // carry a base symbol for every kept entity (by design -- see `CarryIn`'s
+    // own doc comment), so the same `EntityId` legitimately appears in both.
+    // Same id always means same content here (Phase 3's determinism
+    // guarantee), so the first occurrence is kept and every later one
+    // dropped, rather than letting them accumulate into the final result --
+    // caught via Phase 18.1's real-world benchmarking, where this
+    // dropped-nowhere concatenation inflated a large repo's raw symbol count
+    // by ~44% after a single-file edit (compounding further on each
+    // subsequent incremental run, since the next run's carry-in is this
+    // run's already-duplicated output).
+    let mut seen_symbol_ids: HashSet<EntityId> = HashSet::with_capacity(all_symbols.len());
+    all_symbols.retain(|symbol| seen_symbol_ids.insert(symbol.id.clone()));
+
     let depends_on = resolve_depends_on(&all_edges, &owner_file, &module_symbol_for_file);
     all_edges.extend(depends_on);
 
@@ -617,6 +631,54 @@ mod tests {
         assert_eq!(
             incremental_graph.canonical_form(),
             full_graph.canonical_form()
+        );
+    }
+
+    #[test]
+    fn incremental_reanalysis_of_a_modified_file_does_not_duplicate_carried_in_symbols() {
+        // Regression test: `Graph::build`'s `HashMap<EntityId, Node>` silently
+        // dedupes by id, so the tests above (which only compare
+        // `canonical_form()`) can't catch a bug in the *raw* `AnalysisResult`
+        // vectors themselves. This repo's unchanged `shape.rs` must not get
+        // a second copy of its own base symbol merely because `circle.rs`
+        // was edited -- found via real-world benchmarking (Phase 18.1) on a
+        // large multi-crate repository, where editing any single file
+        // inflated the raw symbol count by ~44%.
+        let repo = write_repo(&[
+            ("src/shape.rs", "pub trait Shape { fn area(&self) -> f64; }"),
+            (
+                "src/circle.rs",
+                "use crate::shape::Shape;\npub struct Circle;\nimpl Shape for Circle { fn area(&self) -> f64 { 0.0 } }",
+            ),
+        ]);
+        let previous_repository = hashed_repo(&repo.root);
+        let previous = analyze_repository(&previous_repository).expect("initial analysis");
+
+        fs::write(
+            repo.root.join("src/circle.rs"),
+            "use crate::shape::Shape;\npub struct Circle;\nimpl Shape for Circle { fn area(&self) -> f64 { 1.0 } }",
+        )
+        .expect("rewrite circle.rs");
+        let updated_repository = hashed_repo(&repo.root);
+
+        let incremental =
+            analyze_incremental(&updated_repository, &previous_repository.files, &previous)
+                .expect("incremental analysis succeeds");
+        let full_rebuild = analyze_repository(&updated_repository).expect("full rebuild succeeds");
+
+        let unique_count: usize = {
+            let set: HashSet<&EntityId> = incremental.symbols.iter().map(|s| &s.id).collect();
+            set.len()
+        };
+        assert_eq!(
+            incremental.symbols.len(),
+            unique_count,
+            "incremental re-analysis produced duplicate symbol entries for the same EntityId"
+        );
+        assert_eq!(
+            incremental.symbols.len(),
+            full_rebuild.symbols.len(),
+            "incremental re-analysis's raw symbol count should match a full rebuild's, not just its deduped Graph form"
         );
     }
 

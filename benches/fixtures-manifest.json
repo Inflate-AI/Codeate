@@ -1,0 +1,13 @@
+{
+  "fixtures": [
+    {
+      "language": "rust",
+      "repo": "rust-lang/cargo",
+      "commit": "bb2126cffae48394a37db8728dc50a17bbfe54d4",
+      "subdir": null,
+      "license": "Apache-2.0",
+      "approx_files": 412,
+      "approx_size_mb": 73
+    }
+  ]
+}

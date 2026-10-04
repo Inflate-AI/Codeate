@@ -112,6 +112,17 @@ function Fetch-Fixture {
     }
     Remove-Item -Recurse -Force -Path $extractDir
 
+    # `tar.exe` recreates a tarball's symlink entries as Windows reparse
+    # points, which several tools (observed: code-review-graph's Python
+    # file-collection code) fail to even `stat()` without Developer Mode or
+    # admin rights -- a Windows-specific tar-extraction fragility, not
+    # anything specific to one repo. None of this benchmark's tools need a
+    # working symlink for static analysis, so they're removed outright
+    # rather than worked around per-fixture.
+    Get-ChildItem -Path $target -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.LinkType } |
+        ForEach-Object { Remove-Item -Force -Path $_.FullName }
+
     if ($IgnoreGlobs -and $IgnoreGlobs.Count -gt 0) {
         # A fixture's own deliberately-invalid test data (e.g. a
         # compiler-test fixture containing intentionally broken syntax,

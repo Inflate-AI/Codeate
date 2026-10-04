@@ -42,11 +42,14 @@ performs with vs. without any of these tools.
   `status --json` (Code Review Graph) or `graph.json` array lengths (Graphify) — a
   fair, same-semantic-content bar, though coarser than Codeate's own id-level diff.
 - **Coverage/depth — what each tool's graph actually contains, not a ranking.** The
-  entity/edge **kinds** present in each tool's own output from a cold run:
-  Codeate's closed `SyntaxKind`/`EdgeKind` enums, Code Review Graph's
-  `nodes.kind`/`edges.kind` SQLite columns, Graphify's `nodes[].type`/
-  `links[].relation` JSON fields. This table exists to show what each tool models,
-  not to declare a winner.
+  entity/edge **kinds** present in each tool's own output from a cold run,
+  with observed counts for each — Codeate's via `codeate-bench coverage summarize
+  <graph.json>` (groups `syntax_entities`/`symbols`/`edges` by their `SyntaxKind`/
+  `SymbolKind`/`EdgeKind`), Code Review Graph's via its `nodes.kind`/`edges.kind`
+  SQLite columns, Graphify's via its `nodes[].type`/`links[].relation` JSON fields.
+  A kind that occurred zero times in a given fixture is omitted, not listed as
+  zero — the same convention all three tools' rows follow. This table exists to
+  show what each tool models, not to declare a winner.
 - **Fixtures.** One real-world repository per language, pinned by commit, fetched
   fresh as a single-commit tarball snapshot (no `git clone`, no upstream history —
   see `benches/fixtures-manifest.json` and `scripts/fetch-benchmark-fixtures.ps1`).
@@ -79,6 +82,6 @@ fixtures, not representative source; see the manifest's `ignore_globs`).
 
 | Tool | Entity/node kinds observed | Edge/relation kinds observed |
 |---|---|---|
-| codeate | Closed `SyntaxKind` enum (Module, Class, Struct, Enum, Function, Method, Variable, Parameter, Statement, Expression, Package, Dependency, BuildTarget, Configuration, Test, EntryPoint, ApiEndpoint, GeneratedCode — 18 variants) + `SymbolKind` | Closed `EdgeKind` enum, 14 variants: CONTAINS, IMPORTS, EXPORTS, DECLARES, REFERENCES, CALLS, EXTENDS, IMPLEMENTS, OVERRIDES, INSTANTIATES, RETURNS, ACCEPTS, DEPENDS_ON, DEFINED_IN |
+| codeate | `Expression` (6274), `Parameter` (6031), `Variable` (5243), `Method` (3066), `Statement` (2300), `Function` (1885), `Struct` (564), `Module` (740), `Test` (343), `Enum` (209), `Dependency` (207), `Interface` (32), `BuildTarget` (31), `EntryPoint` (30), `Package` (29), `Class` (1) — plus `SymbolKind`: `Symbol` (14205), `Type` (929), `Method` (2685), `Namespace` (760), `Function` (1860), `Constant` (207) | `REFERENCES` (20228), `CONTAINS` (26252), `CALLS` (19980), `DEPENDS_ON` (6642), `DECLARES` (6136), `DEFINED_IN` (6136), `IMPORTS` (5188), `OVERRIDES` (695), `INSTANTIATES` (672), `EXPORTS` (1083), `IMPLEMENTS` (516), `EXTENDS` (7) |
 | code-review-graph | `Function` (9355), `File` (1381), `Class` (871), `Test` (558) | `CALLS` (108943), `CONTAINS` (10905), `IMPORTS_FROM` (7340), `TESTED_BY` (5361), `IMPLEMENTS` (520), `REFERENCES` (197) |
 | graphify | Mostly untyped: 17989/19237 node records have no `type` field; the few that do are `package` (556) or `external` (692) | `calls` (8481), `references` (12636), `contains` (10989), `imports_from` (6682), `method` (3064), `case_of` (696), `depends_on` (692), `implements` (231), `defines` (11), `inherits` (1), `imports` (5) |

@@ -19,6 +19,9 @@ enum Command {
     /// Diff two `codeate analyze --full` runs over the same fixture and
     /// report whether they're identical.
     Determinism(DeterminismArgs),
+    /// Summarize a stored Code Graph's per-kind entity/symbol/edge counts,
+    /// for a language's coverage/depth table.
+    Coverage(CoverageArgs),
 }
 
 #[derive(Args)]
@@ -66,12 +69,25 @@ enum DeterminismAction {
     Diff { first: PathBuf, second: PathBuf },
 }
 
+#[derive(Args)]
+struct CoverageArgs {
+    #[command(subcommand)]
+    action: CoverageAction,
+}
+
+#[derive(Subcommand)]
+enum CoverageAction {
+    /// Load a stored Code Graph and print its per-kind counts as JSON.
+    Summarize { graph: PathBuf },
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Fixtures(args) => run_fixtures(args),
         Command::Metrics(args) => run_metrics(args),
         Command::Determinism(args) => run_determinism(args),
+        Command::Coverage(args) => run_coverage(args),
     }
 }
 
@@ -164,6 +180,31 @@ fn run_determinism(args: DeterminismArgs) -> ExitCode {
             } else {
                 println!("NOT deterministic: {report:#?}");
                 ExitCode::FAILURE
+            }
+        }
+    }
+}
+
+fn run_coverage(args: CoverageArgs) -> ExitCode {
+    match args.action {
+        CoverageAction::Summarize { graph } => {
+            let stored = match codeate_core::store::load(&graph) {
+                Ok(stored) => stored,
+                Err(err) => {
+                    eprintln!("error: could not load {}: {err}", graph.display());
+                    return ExitCode::FAILURE;
+                }
+            };
+            let summary = codeate_bench::coverage::summarize(&stored);
+            match serde_json::to_string_pretty(&summary) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("error: could not serialize summary: {err}");
+                    ExitCode::FAILURE
+                }
             }
         }
     }

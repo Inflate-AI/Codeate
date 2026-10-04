@@ -1,3 +1,4 @@
+pub mod coverage;
 pub mod determinism;
 pub mod format;
 pub mod manifest;

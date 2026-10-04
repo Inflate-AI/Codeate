@@ -18,6 +18,13 @@ pub struct FixtureEntry {
     pub license: String,
     pub approx_files: u32,
     pub approx_size_mb: u32,
+    /// Paths to exclude from analysis via a generated `.codeateignore`, for
+    /// a fixture's own deliberately-invalid test data (e.g. a compiler-test
+    /// fixture containing intentionally broken syntax) that isn't
+    /// representative source code -- documented per-entry rather than
+    /// silently dropped.
+    #[serde(default)]
+    pub ignore_globs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -82,6 +89,24 @@ mod tests {
         assert_eq!(manifest.fixtures[0].language, "rust");
         assert_eq!(manifest.fixtures[0].commit, commit);
         assert_eq!(manifest.fixtures[0].subdir, None);
+    }
+
+    #[test]
+    fn defaults_ignore_globs_to_empty_when_absent() {
+        let commit = "e".repeat(40);
+        let json = format!(r#"{{"fixtures": [{}]}}"#, valid_entry_json("go", &commit));
+        let manifest = parse_manifest(&json).expect("valid manifest parses");
+        assert_eq!(manifest.fixtures[0].ignore_globs, Vec::<String>::new());
+    }
+
+    #[test]
+    fn parses_an_entry_with_ignore_globs() {
+        let commit = "f".repeat(40);
+        let json = format!(
+            r#"{{"fixtures": [{{"language": "rust", "repo": "owner/repo", "commit": "{commit}", "license": "MIT", "approx_files": 10, "approx_size_mb": 1, "ignore_globs": ["tests/broken/"]}}]}}"#
+        );
+        let manifest = parse_manifest(&json).expect("valid manifest with ignore_globs parses");
+        assert_eq!(manifest.fixtures[0].ignore_globs, vec!["tests/broken/".to_string()]);
     }
 
     #[test]

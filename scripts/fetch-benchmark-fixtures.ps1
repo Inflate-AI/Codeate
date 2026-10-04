@@ -58,6 +58,7 @@ function Fetch-Fixture {
         [string]$Repo,
         [string]$Commit,
         [string]$Subdir,
+        [string[]]$IgnoreGlobs,
         [string]$FixturesRoot
     )
 
@@ -111,6 +112,29 @@ function Fetch-Fixture {
     }
     Remove-Item -Recurse -Force -Path $extractDir
 
+    if ($IgnoreGlobs -and $IgnoreGlobs.Count -gt 0) {
+        # A fixture's own deliberately-invalid test data (e.g. a
+        # compiler-test fixture containing intentionally broken syntax,
+        # not representative source) -- documented per-manifest-entry
+        # rather than silently dropped or causing the whole analyze run to
+        # abort on an unrelated file's parse error.
+        $IgnoreGlobs | Set-Content -Path (Join-Path $target ".codeateignore")
+    }
+
+    # code-review-graph's `update --base <commit>` is git-diff-based, so the
+    # fixture needs *some* local history to diff against for the
+    # incremental-update metric. This is a single fresh commit of the
+    # fetched snapshot -- not the upstream repo's real history (that
+    # remains the thing this script deliberately never pulls).
+    Push-Location $target
+    git init --quiet
+    git config core.autocrlf false
+    git config user.email "bench@codeate.local"
+    git config user.name "codeate-bench"
+    git add -A 2>$null
+    git commit --quiet -m "Fixture snapshot at $Commit"
+    Pop-Location
+
     $marker = @{
         commit    = $Commit
         repo      = $Repo
@@ -139,5 +163,5 @@ foreach ($fixture in $fixtures) {
         Remove-FixtureTree -Path $target
         continue
     }
-    Fetch-Fixture -Lang $fixture.language -Repo $fixture.repo -Commit $fixture.commit -Subdir $fixture.subdir -FixturesRoot $FixturesRoot
+    Fetch-Fixture -Lang $fixture.language -Repo $fixture.repo -Commit $fixture.commit -Subdir $fixture.subdir -IgnoreGlobs $fixture.ignore_globs -FixturesRoot $FixturesRoot
 }

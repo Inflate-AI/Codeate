@@ -7,7 +7,8 @@
       "subdir": null,
       "license": "Apache-2.0",
       "approx_files": 412,
-      "approx_size_mb": 73
+      "approx_size_mb": 73,
+      "ignore_globs": ["tests/testsuite/", "crates/rustfix/tests/"]
     }
   ]
 }

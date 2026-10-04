@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/codeate-core", "crates/codeate-cli", "crates/codeate-api"]
+members = [
+    "crates/codeate-core",
+    "crates/codeate-cli",
+    "crates/codeate-api",
+    "crates/codeate-bench",
+]
 
 [workspace.package]
 version = "0.1.0"

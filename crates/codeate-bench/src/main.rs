@@ -4,7 +4,11 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "codeate-bench", version, about = "Phase 18.1 benchmark harness")]
+#[command(
+    name = "codeate-bench",
+    version,
+    about = "Phase 18.1 benchmark harness"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -175,7 +179,11 @@ fn run_determinism(args: DeterminismArgs) -> ExitCode {
             };
             let report = codeate_bench::determinism::diff(&first_graph, &second_graph);
             if report.is_clean() {
-                println!("deterministic: {} and {} are identical", first.display(), second.display());
+                println!(
+                    "deterministic: {} and {} are identical",
+                    first.display(),
+                    second.display()
+                );
                 ExitCode::SUCCESS
             } else {
                 println!("NOT deterministic: {report:#?}");

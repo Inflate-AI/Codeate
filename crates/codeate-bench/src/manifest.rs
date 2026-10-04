@@ -67,7 +67,10 @@ pub fn parse_manifest(json: &str) -> Result<Manifest, ManifestError> {
 }
 
 fn is_valid_commit_sha(commit: &str) -> bool {
-    commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    commit.len() == 40
+        && commit
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 #[cfg(test)]
@@ -106,7 +109,10 @@ mod tests {
             r#"{{"fixtures": [{{"language": "rust", "repo": "owner/repo", "commit": "{commit}", "license": "MIT", "approx_files": 10, "approx_size_mb": 1, "ignore_globs": ["tests/broken/"]}}]}}"#
         );
         let manifest = parse_manifest(&json).expect("valid manifest with ignore_globs parses");
-        assert_eq!(manifest.fixtures[0].ignore_globs, vec!["tests/broken/".to_string()]);
+        assert_eq!(
+            manifest.fixtures[0].ignore_globs,
+            vec!["tests/broken/".to_string()]
+        );
     }
 
     #[test]
@@ -116,7 +122,10 @@ mod tests {
             r#"{{"fixtures": [{{"language": "ruby", "repo": "rails/rails", "commit": "{commit}", "subdir": "activerecord", "license": "MIT", "approx_files": 2000, "approx_size_mb": 80}}]}}"#
         );
         let manifest = parse_manifest(&json).expect("valid manifest with subdir parses");
-        assert_eq!(manifest.fixtures[0].subdir, Some("activerecord".to_string()));
+        assert_eq!(
+            manifest.fixtures[0].subdir,
+            Some("activerecord".to_string())
+        );
     }
 
     #[test]
@@ -147,7 +156,10 @@ mod tests {
 
     #[test]
     fn rejects_a_malformed_commit_sha() {
-        let json = format!(r#"{{"fixtures": [{}]}}"#, valid_entry_json("python", "not-a-sha"));
+        let json = format!(
+            r#"{{"fixtures": [{}]}}"#,
+            valid_entry_json("python", "not-a-sha")
+        );
         let err = parse_manifest(&json).expect_err("malformed commit SHA should error");
         assert_eq!(
             err,

@@ -26,8 +26,7 @@ pub fn default_registry() -> LanguageRegistry {
         LanguageDescriptor::new(LanguageId::known("typescript")).with_extensions(["ts", "tsx"]),
     );
     registry.register(LanguageDescriptor::new(LanguageId::known("go")).with_extensions(["go"]));
-    registry
-        .register(LanguageDescriptor::new(LanguageId::known("java")).with_extensions(["java"]));
+    registry.register(LanguageDescriptor::new(LanguageId::known("java")).with_extensions(["java"]));
     // `.c` only, deliberately -- `.h` is ambiguous between C and C++ and is
     // registered under C++ below (17.8) rather than C, since `tree-sitter-cpp`
     // parses C-style headers fine too and C++ is the more common modern
@@ -37,8 +36,7 @@ pub fn default_registry() -> LanguageRegistry {
         LanguageDescriptor::new(LanguageId::known("cpp"))
             .with_extensions(["cpp", "cc", "cxx", "hpp", "h", "hh"]),
     );
-    registry
-        .register(LanguageDescriptor::new(LanguageId::known("csharp")).with_extensions(["cs"]));
+    registry.register(LanguageDescriptor::new(LanguageId::known("csharp")).with_extensions(["cs"]));
     registry.register(
         LanguageDescriptor::new(LanguageId::known("kotlin")).with_extensions(["kt", "kts"]),
     );

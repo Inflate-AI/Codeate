@@ -32,7 +32,11 @@ pub fn aggregate(samples: &[f64]) -> Option<Aggregate> {
     let variance = samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
     let stdev = variance.sqrt();
 
-    Some(Aggregate { mean, median, stdev })
+    Some(Aggregate {
+        mean,
+        median,
+        stdev,
+    })
 }
 
 #[cfg(test)]

@@ -248,7 +248,10 @@ fn c_adapter_produces_equivalent_calls_query_behavior_to_every_other_adapter() {
     // edges -- C has no construct for either, unlike every other adapter
     // in this suite.
     assert!(!c_result.edges.iter().any(|e| e.kind == EdgeKind::Extends));
-    assert!(!c_result.edges.iter().any(|e| e.kind == EdgeKind::Implements));
+    assert!(!c_result
+        .edges
+        .iter()
+        .any(|e| e.kind == EdgeKind::Implements));
 }
 
 fn analyze(repo: &TempRepo) -> codeate_core::AnalysisResult {

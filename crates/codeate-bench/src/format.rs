@@ -17,7 +17,9 @@ pub struct BenchResult {
 /// not an error.
 pub fn format_results_table(results: &[BenchResult]) -> String {
     let mut out = String::new();
-    out.push_str("| Language | Tool | Cold (s) | Incremental (s) | Peak Memory (MB) | Deterministic |\n");
+    out.push_str(
+        "| Language | Tool | Cold (s) | Incremental (s) | Peak Memory (MB) | Deterministic |\n",
+    );
     out.push_str("|---|---|---|---|---|---|\n");
     for r in results {
         out.push_str(&format!(

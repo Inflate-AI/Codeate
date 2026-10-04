@@ -51,11 +51,19 @@ impl TypeRef {
             }
             TypeRef::Generic(name) => format!("generic:{name}"),
             TypeRef::Union(members) => {
-                let keys = members.iter().map(TypeRef::key).collect::<Vec<_>>().join("|");
+                let keys = members
+                    .iter()
+                    .map(TypeRef::key)
+                    .collect::<Vec<_>>()
+                    .join("|");
                 format!("union:{keys}")
             }
             TypeRef::Intersection(members) => {
-                let keys = members.iter().map(TypeRef::key).collect::<Vec<_>>().join("&");
+                let keys = members
+                    .iter()
+                    .map(TypeRef::key)
+                    .collect::<Vec<_>>()
+                    .join("&");
                 format!("intersection:{keys}")
             }
             TypeRef::Unresolved(raw) => format!("unresolved:{raw}"),
@@ -197,7 +205,10 @@ mod tests {
         ];
         let union = TypeRef::Union(members.clone());
         let intersection = TypeRef::Intersection(members);
-        assert_ne!(type_symbol_for(&union).id, type_symbol_for(&intersection).id);
+        assert_ne!(
+            type_symbol_for(&union).id,
+            type_symbol_for(&intersection).id
+        );
     }
 
     #[test]

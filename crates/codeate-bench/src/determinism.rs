@@ -42,10 +42,22 @@ pub fn diff(first: &StoredGraph, second: &StoredGraph) -> DeterminismReport {
     let second_edges: HashSet<_> = second.edges.iter().map(edge_key).collect();
 
     DeterminismReport {
-        syntax_only_in_first: first_syntax.difference(&second_syntax).map(|id| (*id).clone()).collect(),
-        syntax_only_in_second: second_syntax.difference(&first_syntax).map(|id| (*id).clone()).collect(),
-        symbols_only_in_first: first_symbols.difference(&second_symbols).map(|id| (*id).clone()).collect(),
-        symbols_only_in_second: second_symbols.difference(&first_symbols).map(|id| (*id).clone()).collect(),
+        syntax_only_in_first: first_syntax
+            .difference(&second_syntax)
+            .map(|id| (*id).clone())
+            .collect(),
+        syntax_only_in_second: second_syntax
+            .difference(&first_syntax)
+            .map(|id| (*id).clone())
+            .collect(),
+        symbols_only_in_first: first_symbols
+            .difference(&second_symbols)
+            .map(|id| (*id).clone())
+            .collect(),
+        symbols_only_in_second: second_symbols
+            .difference(&first_symbols)
+            .map(|id| (*id).clone())
+            .collect(),
         edges_only_in_first: first_edges.difference(&second_edges).count(),
         edges_only_in_second: second_edges.difference(&first_edges).count(),
     }
@@ -56,7 +68,11 @@ mod tests {
     use super::*;
     use codeate_core::{Edge, EdgeKind, SymbolEntity, SymbolKind, SyntaxEntity, SyntaxKind};
 
-    fn graph_with(entities: Vec<SyntaxEntity>, symbols: Vec<SymbolEntity>, edges: Vec<Edge>) -> StoredGraph {
+    fn graph_with(
+        entities: Vec<SyntaxEntity>,
+        symbols: Vec<SymbolEntity>,
+        edges: Vec<Edge>,
+    ) -> StoredGraph {
         StoredGraph {
             version: codeate_core::CURRENT_VERSION,
             syntax_entities: entities,
@@ -73,7 +89,11 @@ mod tests {
         let symbol = SymbolEntity::new(SymbolKind::Function, "a.rs", "foo");
         let edge = Edge::new(entity.id.clone(), symbol.id.clone(), EdgeKind::DefinedIn);
 
-        let first = graph_with(vec![entity.clone()], vec![symbol.clone()], vec![edge.clone()]);
+        let first = graph_with(
+            vec![entity.clone()],
+            vec![symbol.clone()],
+            vec![edge.clone()],
+        );
         let second = graph_with(vec![entity], vec![symbol], vec![edge]);
 
         let report = diff(&first, &second);
